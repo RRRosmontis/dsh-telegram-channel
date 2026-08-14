@@ -4,11 +4,27 @@
 
 Telegram **手机遥控器** for DeepSeek Harness：附着本机正在跑的 Web 会话，与电脑 **同轨迹、双向可见**（Codex-style）。
 
+**发现：** [dsh-plugin topic](https://github.com/topics/dsh-plugin) · 安装：`dsh plugin --profile web add github:hi-wenw/dsh-telegram-channel`
+
 **Keywords：** Telegram · Bot · Mobile · Remote · DSH · Cordis · dsh-plugin · sessions · bind
 
 ---
 
 ## 中文
+
+### 使用前需要什么
+
+| 需要 | 说明 |
+|---|---|
+| DeepSeek Harness（`dsh`） | 本机已能跑通 `dsh web` |
+| Node.js | 跟 Harness 走，建议 ≥22 |
+| Telegram Bot Token | `@BotFather` → `/newbot` |
+| 数字 User ID | `@userinfobot` |
+| 代理（可选） | 若直连不上 `api.telegram.org`，需本机 HTTP(S)_PROXY |
+
+**不需要 Python。**
+
+---
 
 ### 30 秒理解
 
@@ -171,6 +187,22 @@ npm test
 npm run build
 ```
 
+### 发布与发现（社区插件）
+
+社区发现入口主要是 GitHub topic，不是封闭应用商店审核：
+
+1. 仓库 **公开**，`package.json` 声明 `dsh.bundle.patch`（本仓库已有）
+2. About → Topics 加上 **`dsh-plugin`**（已加；可浏览 [topic 列表](https://github.com/topics/dsh-plugin)）
+3. 用户安装：
+
+```powershell
+dsh plugin --profile web add github:hi-wenw/dsh-telegram-channel
+```
+
+4. 可选：收录到 [awesome-deepseek-harness](https://github.com/0xsline/awesome-deepseek-harness) 等精选列表；可选再发 npm
+
+官方也建议插件作者使用 [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic 方便检索。
+
 ### 许可证
 
 [MIT](LICENSE)
@@ -178,6 +210,14 @@ npm run build
 ---
 
 ## English
+
+### Prerequisites
+
+- Working DeepSeek Harness (`dsh web`)
+- Node.js (typically ≥22 with Harness)
+- Telegram bot token + numeric user id
+- Optional HTTP(S)_PROXY if Telegram API is blocked
+- **No Python required**
 
 ### What this is
 
@@ -222,6 +262,14 @@ dsh plugin --profile web add github:hi-wenw/dsh-telegram-channel
 ```
 
 Allowlist via `DSH_TELEGRAM_ALLOWED_USER_IDS` (preferred) or id-targeted YAML override — **never** re-`insert` the same plugin id.
+
+### Discoverability
+
+Listed under the public GitHub topic [`dsh-plugin`](https://github.com/topics/dsh-plugin). Install:
+
+```powershell
+dsh plugin --profile web add github:hi-wenw/dsh-telegram-channel
+```
 
 ### License
 
