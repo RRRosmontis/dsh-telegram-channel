@@ -29,7 +29,10 @@ Telegram **手机遥控器** for DeepSeek Harness：附着本机正在跑的 Web
 
 > Token 不要发到公开群；泄露了去 BotFather `/revoke`。
 
-#### Windows（PowerShell）
+#### Windows
+
+> 下面命令请在 **PowerShell** 里执行（开始菜单搜 “Windows PowerShell” / “终端”）。  
+> 若窗口标题是 **命令提示符 / CMD**，先输入 `powershell` 回车，再贴命令。
 
 **方式 A — 远程一键（交互输入 Token / User ID）：**
 
@@ -37,12 +40,24 @@ Telegram **手机遥控器** for DeepSeek Harness：附着本机正在跑的 Web
 irm https://raw.githubusercontent.com/hi-wenw/dsh-telegram-channel/master/scripts/install.ps1 | iex
 ```
 
+等价写法（更不易混淆）：
+
+```powershell
+Invoke-RestMethod https://raw.githubusercontent.com/hi-wenw/dsh-telegram-channel/master/scripts/install.ps1 | Invoke-Expression
+```
+
+**CMD 用户一键进入并执行：**
+
+```bat
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/hi-wenw/dsh-telegram-channel/master/scripts/install.ps1 | iex"
+```
+
 **方式 B — 带参数（不交互）：**
 
 ```powershell
 git clone https://github.com/hi-wenw/dsh-telegram-channel.git
 cd dsh-telegram-channel
-.\scripts\install.ps1 -Token '这里粘贴Token' -UserId '这里粘贴数字ID'
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Token '这里粘贴Token' -UserId '这里粘贴数字ID'
 ```
 
 脚本会自动：
