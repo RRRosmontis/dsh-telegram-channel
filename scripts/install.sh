@@ -58,6 +58,7 @@ persist_env() {
   done
 }
 
+# pnpm 10+/11: package-name alone does NOT approve git/tarball installs.
 ensure_allow_builds() {
   local ws="$1/pnpm-workspace.yaml"
   if [[ ! -f "$ws" ]]; then
@@ -70,13 +71,54 @@ autoInstallPeers: false
 
 allowBuilds:
   dsh-telegram-channel: true
+  'dsh-telegram-channel@git+https://github.com/hi-wenw/dsh-telegram-channel.git': true
 EOF
-  elif ! grep -q 'dsh-telegram-channel:' "$ws"; then
-    if grep -q '^allowBuilds:' "$ws"; then
-      awk 'BEGIN{done=0} /^allowBuilds:/{print; print "  dsh-telegram-channel: true"; done=1; next} {print} END{if(!done){print ""; print "allowBuilds:"; print "  dsh-telegram-channel: true"}}' "$ws" >"$ws.tmp" && mv "$ws.tmp" "$ws"
-    else
-      printf '\nallowBuilds:\n  dsh-telegram-channel: true\n' >>"$ws"
-    fi
+    echo "Created $ws (allowBuilds)"
+    return
+  fi
+
+  # Drop pnpm auto-placeholders for this package.
+  if grep -q 'dsh-telegram-channel@https://codeload.github.com' "$ws" 2>/dev/null; then
+    tmp="$(mktemp)"
+    grep -v 'dsh-telegram-channel@https://codeload.github.com.*set this to true or false' "$ws" >"$tmp" || true
+    mv "$tmp" "$ws"
+  fi
+
+  local need_name=0 need_repo=0
+  grep -qE '^[[:space:]]*dsh-telegram-channel:[[:space:]]*true[[:space:]]*$' "$ws" || need_name=1
+  grep -q 'dsh-telegram-channel@git+https://github.com/hi-wenw/dsh-telegram-channel.git' "$ws" || need_repo=1
+  if [[ "$need_name" -eq 0 && "$need_repo" -eq 0 ]]; then
+    echo "allowBuilds already present (git repo + package name), skip"
+    return
+  fi
+
+  local insert=""
+  [[ "$need_name" -eq 1 ]] && insert+=$'  dsh-telegram-channel: true\n'
+  [[ "$need_repo" -eq 1 ]] && insert+=$'  '\''dsh-telegram-channel@git+https://github.com/hi-wenw/dsh-telegram-channel.git'\'': true\n'
+
+  if grep -q '^allowBuilds:' "$ws"; then
+    tmp="$(mktemp)"
+    awk -v insert="$insert" '
+      BEGIN { done=0 }
+      /^allowBuilds:/ {
+        print
+        printf "%s", insert
+        done=1
+        next
+      }
+      { print }
+      END {
+        if (!done) {
+          print ""
+          print "allowBuilds:"
+          printf "%s", insert
+        }
+      }
+    ' "$ws" >"$tmp" && mv "$tmp" "$ws"
+    echo "Updated allowBuilds (git repo approval) -> $ws"
+  else
+    printf '\nallowBuilds:\n%s' "$insert" >>"$ws"
+    echo "Appended allowBuilds -> $ws"
   fi
 }
 

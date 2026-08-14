@@ -74,13 +74,20 @@ function Get-UserEnv([string] $Name) {
   return [Environment]::GetEnvironmentVariable($Name, 'Process')
 }
 
+# pnpm 10+/11: package-name alone does NOT approve git/tarball installs.
+# Need the stable repo key (works across commits). See: https://pnpm.io/settings/build
+function Get-AllowBuildsEntries {
+  return @(
+    '  dsh-telegram-channel: true'
+    "  'dsh-telegram-channel@git+https://github.com/hi-wenw/dsh-telegram-channel.git': true"
+  )
+}
+
 function Ensure-AllowBuilds([string] $ProfileDir) {
   $path = Join-Path $ProfileDir 'pnpm-workspace.yaml'
-  $blockLines = @(
-    'allowBuilds:'
-    '  dsh-telegram-channel: true'
-  )
-  $block = $blockLines -join "`r`n"
+  $entries = Get-AllowBuildsEntries
+  $block = (@('allowBuilds:') + $entries) -join "`r`n"
+
   if (-not (Test-Path -LiteralPath $path)) {
     $content = @(
       'packages:'
@@ -97,18 +104,31 @@ function Ensure-AllowBuilds([string] $ProfileDir) {
   }
 
   $raw = Get-Content -LiteralPath $path -Raw
-  if ($raw -match '(?m)^\s*dsh-telegram-channel\s*:\s*true\s*$') {
-    Write-Host 'allowBuilds already present, skip'
+  # Drop pnpm auto-placeholders ("set this to true or false") for this package.
+  $raw = [regex]::Replace(
+    $raw,
+    '(?m)^\s*[''"]?dsh-telegram-channel@https://codeload\.github\.com/[^\r\n]+:\s*set this to true or false\s*\r?\n?',
+    ''
+  )
+
+  $repoKeyPresent = $raw -match 'dsh-telegram-channel@git\+https://github\.com/hi-wenw/dsh-telegram-channel\.git'
+  $nameKeyPresent = $raw -match '(?m)^\s*dsh-telegram-channel\s*:\s*true\s*$'
+  if ($repoKeyPresent -and $nameKeyPresent) {
+    Write-Host 'allowBuilds already present (git repo + package name), skip'
     return
   }
 
+  $toInsert = @()
+  if (-not $nameKeyPresent) { $toInsert += '  dsh-telegram-channel: true' }
+  if (-not $repoKeyPresent) {
+    $toInsert += "  'dsh-telegram-channel@git+https://github.com/hi-wenw/dsh-telegram-channel.git': true"
+  }
+  $insertText = ($toInsert -join "`r`n")
+
   if ($raw -match '(?m)^allowBuilds\s*:') {
-    if ($raw -notmatch '(?m)^allowBuilds\s*:[\s\S]*?dsh-telegram-channel\s*:') {
-      $raw = $raw -replace '(?m)^(allowBuilds\s*:)', ('$1' + "`r`n  dsh-telegram-channel: true")
-      $out = ($raw.TrimEnd() + "`r`n")
-      Set-Content -LiteralPath $path -Value $out -Encoding utf8
-      Write-Host ("Wrote allowBuilds.dsh-telegram-channel -> " + $path)
-    }
+    $raw = $raw -replace '(?m)^(allowBuilds\s*:)', ('$1' + "`r`n" + $insertText)
+    Set-Content -LiteralPath $path -Value ($raw.TrimEnd() + "`r`n") -Encoding utf8
+    Write-Host ("Updated allowBuilds (git repo approval) -> " + $path)
     return
   }
 

@@ -181,7 +181,7 @@ dsh plugin --profile web add D:\path\to\dsh-telegram-channel
 
 | 现象 | 处理 |
 |---|---|
-| `allowBuilds` / `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED` | 再跑一遍安装脚本，或手工在 `~\.dsh\profiles\web\pnpm-workspace.yaml` 加 `allowBuilds.dsh-telegram-channel: true` |
+| `ERR_PNPM_IGNORED_BUILDS` / allowBuilds | pnpm 11 起：**仅** `dsh-telegram-channel: true` 不够（git 包无效）。在 `~\.dsh\profiles\web\pnpm-workspace.yaml` 写入仓库级授权后重装：<br>`'dsh-telegram-channel@git+https://github.com/hi-wenw/dsh-telegram-channel.git': true`<br>再跑菜单 **1**（新版安装脚本会自动写） |
 | `duplicate loader entry id: dsh-telegram-channel` | 用户 patch **不要 insert** 同名 id；用上面的 `- id:` 覆盖，或只用环境变量白名单 |
 | 手机完全没回复 / ConnectTimeout | 打开本地代理（如 7890），重启 `dsh web` |
 | `missing bot token` | 检查环境变量；**新开终端**再 `dsh web` |
