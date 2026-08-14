@@ -19,6 +19,8 @@ export interface CatalogSnapshot {
     workspaces: WorkspaceRow[];
     sessionsById: Map<string, SessionRow>;
     archivedIds: Set<string>;
+    /** true when loaded from apiProxy (Web-aligned); false for live-agent fallback. */
+    complete: boolean;
 }
 /** Load workspaces + sessions aligned with Web UI (via apiProxy when available). */
 export declare function loadCatalog(ctx: Context): Promise<CatalogSnapshot | undefined>;

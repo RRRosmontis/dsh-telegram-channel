@@ -8,6 +8,7 @@ import {
 
 test('visible sessions exclude archived blank and subagent', () => {
   const catalog: CatalogSnapshot = {
+    complete: true,
     archivedIds: new Set(['arch']),
     sessionsById: new Map([
       ['ok', { sessionId: 'ok', title: 'OK', blank: false, running: true, updatedAt: 1 }],

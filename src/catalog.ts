@@ -25,6 +25,8 @@ export interface CatalogSnapshot {
   workspaces: WorkspaceRow[]
   sessionsById: Map<string, SessionRow>
   archivedIds: Set<string>
+  /** true when loaded from apiProxy (Web-aligned); false for live-agent fallback. */
+  complete: boolean
 }
 
 type RpcOk<T> = { result: { ok: true; value: T } }
@@ -107,7 +109,7 @@ export async function loadCatalog(ctx: Context): Promise<CatalogSnapshot | undef
     sessionIds: (w.sessionIds ?? []).map(String),
   }))
 
-  return { workspaces, sessionsById, archivedIds }
+  return { workspaces, sessionsById, archivedIds, complete: true }
 }
 
 /** Sessions visible under one workspace (Web-like filters). */
@@ -170,5 +172,5 @@ export function catalogFromLiveAgents(agents: Agent[], ctx?: Context): CatalogSn
     sessionIds: bucket.sessionIds,
   }))
 
-  return { workspaces, sessionsById, archivedIds: new Set() }
+  return { workspaces, sessionsById, archivedIds: new Set(), complete: false }
 }

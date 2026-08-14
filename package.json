@@ -1,6 +1,6 @@
 {
   "name": "dsh-telegram-channel",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "DeepSeek Harness Telegram mobile remote: workspace→session picker (Web-aligned), /model switch, same trajectory — dsh-plugin",
   "keywords": [
     "telegram",
