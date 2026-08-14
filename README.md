@@ -188,7 +188,7 @@ dsh plugin --profile web add D:\path\to\dsh-telegram-channel
 | 「无权限」 | User ID 必须是 `@userinfobot` 的数字 |
 | `/sessions` 无会话 | 确认 Web 有未归档会话；空白会话会被隐藏 |
 | `/sessions` 比电脑少很多 | 升级到 ≥0.3.0：应按工作区列出；仍少则检查是否归档 |
-| `/model` 不可用 | 需 `dsh web`（apiProxy）；先 `/sessions` 绑定 |
+| `/model` 不可用 | 需 `dsh web`（apiProxy）；先 `/sessions` 绑定。≥0.3.2 已修复「未 inject 读不到 apiProxy」 |
 | Telegram 401 | Token 错了或被 revoke |
 
 ---

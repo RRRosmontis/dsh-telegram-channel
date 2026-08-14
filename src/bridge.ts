@@ -432,7 +432,8 @@ export class TelegramBridge {
       await this.client.sendMessage(chatId, body, undefined, keyboard)
     } catch (err) {
       this.ctx.logger.warn(`dsh-telegram-channel: /model failed: ${this.redact(err)}`)
-      await this.client.sendMessage(chatId, MSG.MODEL_UNAVAILABLE)
+      const detail = err instanceof Error ? err.message : String(err)
+      await this.client.sendMessage(chatId, MSG.MODEL_UNAVAILABLE(detail))
     }
   }
 

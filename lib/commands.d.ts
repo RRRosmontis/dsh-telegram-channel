@@ -15,7 +15,7 @@ export declare const MSG: {
     readonly STATUS_BOUND: (label: string) => string;
     readonly STATUS_BOUND_COLD: (label: string) => string;
     readonly GONE: "绑定的会话已不可用。请重新 /sessions。";
-    readonly MODEL_UNAVAILABLE: "无法读取模型列表（需要 dsh web / apiProxy）。请确认本机 Harness 已加载 host-apiproxy。";
+    readonly MODEL_UNAVAILABLE: (detail?: string) => string;
     readonly MODEL_UNROUTABLE: (current: string) => string;
     readonly MODEL_EMPTY: (current: string) => string;
     readonly MODEL_SET: (selected: string) => string;

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { resolveApiProxy } from './apiproxy.js'
 import { describeAgent, workspaceName } from './label.js'
 
 export interface WorkspaceRow {
@@ -59,12 +60,7 @@ function titleOf(summary: {
 
 /** Load workspaces + sessions aligned with Web UI (via apiProxy when available). */
 export async function loadCatalog(ctx: Context): Promise<CatalogSnapshot | undefined> {
-  const api = (ctx as {
-    apiProxy?: {
-      workspace?: { list?: ApiFn }
-      sessions?: { list?: ApiFn }
-    }
-  }).apiProxy
+  const api = resolveApiProxy(ctx)
 
   const wsPromise = rpcCall(api?.workspace?.list, {})
   const sessPromise = rpcCall(api?.sessions?.list, {})

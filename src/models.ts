@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
+import { resolveApiProxy } from './apiproxy.js'
 
 export interface ModelOption {
   provider: string
@@ -17,8 +18,18 @@ export interface ModelSnapshot {
 type ApiFn = (req: { rpcId: string; payload: unknown }) => Promise<unknown>
 
 function unwrap<T>(res: unknown): T | undefined {
-  const r = res as { result?: { ok?: boolean; value?: T } } | undefined
+  const r = res as { result?: { ok?: boolean; value?: T; error?: { message?: string } } } | undefined
   if (r?.result?.ok === true) return r.result.value
+  return undefined
+}
+
+function unwrapError(res: unknown): string | undefined {
+  const r = res as { result?: { ok?: boolean; error?: { message?: string; code?: string } } } | undefined
+  if (r?.result && r.result.ok === false) {
+    const err = r.result.error
+    if (!err) return 'rpc failed'
+    return err.code ? `${err.code}: ${err.message ?? ''}`.trim() : (err.message ?? 'rpc failed')
+  }
   return undefined
 }
 
@@ -28,10 +39,11 @@ async function call(fn: ApiFn | undefined, payload: unknown): Promise<unknown> {
 }
 
 export async function loadSessionModels(ctx: Context, sessionId: string): Promise<ModelSnapshot> {
-  const api = (ctx as {
-    apiProxy?: { sessions?: { models?: ApiFn } }
-  }).apiProxy
-  const raw = await call(api?.sessions?.models, { sessionId })
+  const api = resolveApiProxy(ctx)
+  if (!api?.sessions?.models) {
+    throw new Error('apiProxy unavailable (use ctx.get / inject apiProxy)')
+  }
+  const raw = await call(api.sessions.models, { sessionId })
   const value = unwrap<{
     current: { provider: string; model: string; reasoningEffort?: string }
     routable: boolean
@@ -45,7 +57,9 @@ export async function loadSessionModels(ctx: Context, sessionId: string): Promis
       }>
     }>
   }>(raw)
-  if (!value) throw new Error('failed to load session models')
+  if (!value) {
+    throw new Error(unwrapError(raw) ?? 'failed to load session models')
+  }
 
   const options: ModelOption[] = []
   for (const group of value.groups ?? []) {
@@ -71,17 +85,20 @@ export async function selectSessionModel(
   sessionId: string,
   selection: { provider: string; model: string; reasoningEffort?: string },
 ): Promise<{ provider: string; model: string; reasoningEffort?: string }> {
-  const api = (ctx as {
-    apiProxy?: { sessions?: { selectModel?: ApiFn } }
-  }).apiProxy
-  const raw = await call(api?.sessions?.selectModel, {
+  const api = resolveApiProxy(ctx)
+  if (!api?.sessions?.selectModel) {
+    throw new Error('apiProxy unavailable (use ctx.get / inject apiProxy)')
+  }
+  const raw = await call(api.sessions.selectModel, {
     sessionId,
     provider: selection.provider,
     model: selection.model,
     reasoningEffort: selection.reasoningEffort,
   })
   const value = unwrap<{ selected: { provider: string; model: string; reasoningEffort?: string } }>(raw)
-  if (!value?.selected) throw new Error('failed to select model')
+  if (!value?.selected) {
+    throw new Error(unwrapError(raw) ?? 'failed to select model')
+  }
   return value.selected
 }
 

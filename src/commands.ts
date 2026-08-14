@@ -36,7 +36,11 @@ export const MSG = {
     return `当前绑定：${label}\n（会话当前未在内存中运行；发消息时会自动 resume。）`
   },
   GONE: '绑定的会话已不可用。请重新 /sessions。',
-  MODEL_UNAVAILABLE: '无法读取模型列表（需要 dsh web / apiProxy）。请确认本机 Harness 已加载 host-apiproxy。',
+  MODEL_UNAVAILABLE(detail?: string): string {
+    const tip = '无法读取模型列表。请确认已绑定会话，且本机 dsh web 已加载 host-apiproxy。'
+    if (!detail) return tip
+    return `${tip}\n详情：${detail}`
+  },
   MODEL_UNROUTABLE(current: string): string {
     return `当前模型不可路由：${current}\n请在 Web 或本机配置可用 provider 后再试 /model。`
   },
