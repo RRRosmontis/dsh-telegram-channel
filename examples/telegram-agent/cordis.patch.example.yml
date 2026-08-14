@@ -1,6 +1,5 @@
-- insert:
-    - id: dsh-telegram-channel
-      name: dsh-telegram-channel
-      config:
-        token: ''
-        allowedUserIds: [123456789]
+# 插件安装时已自动 insert。用户 patch 只需按 id 覆盖 config（不要再 insert 同名 id）。
+- id: dsh-telegram-channel
+  config:
+    token: ''
+    allowedUserIds: [123456789]

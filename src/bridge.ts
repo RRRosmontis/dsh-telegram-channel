@@ -87,9 +87,21 @@ export class TelegramBridge {
         this.ctx.logger.error(this.redact(err))
       })
     })
+    void this.client.setMyCommands([
+      { command: 'start', description: '欢迎与用法' },
+      { command: 'sessions', description: '列出并附着本机 live 会话' },
+      { command: 'status', description: '查看当前绑定' },
+      { command: 'unbind', description: '断开手机绑定（不关闭本机会话）' },
+      { command: 'help', description: '显示帮助' },
+    ]).then(() => {
+      this.ctx.logger.info('dsh-telegram-channel: bot commands registered')
+    }).catch((err) => {
+      this.ctx.logger.warn(`dsh-telegram-channel: setMyCommands failed: ${this.redact(err)}`)
+    })
     if (!this.polling) {
       this.polling = true
       this.pollAbort = new AbortController()
+      this.ctx.logger.info('dsh-telegram-channel: long-polling started')
       this.pollPromise = this.pollLoop()
     }
   }

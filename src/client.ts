@@ -1,3 +1,5 @@
+import { EnvHttpProxyAgent, fetch as undiciFetch } from 'undici'
+
 export interface TelegramUser {
   id: number
   is_bot?: boolean
@@ -42,6 +44,11 @@ export interface InlineKeyboardMarkup {
   inline_keyboard: InlineKeyboardButton[][]
 }
 
+export interface TelegramBotCommand {
+  command: string
+  description: string
+}
+
 export interface TelegramClientOptions {
   fetch?: typeof fetch
   baseUrl?: string
@@ -59,6 +66,32 @@ export interface TelegramClientLike {
   ): Promise<TelegramMessage>
   sendChatAction(chatId: number, action: string): Promise<boolean>
   answerCallbackQuery(callbackQueryId: string, text?: string): Promise<boolean>
+  setMyCommands(commands: TelegramBotCommand[]): Promise<boolean>
+}
+
+function resolveProxyUrl(): string | undefined {
+  return (
+    process.env.HTTPS_PROXY
+    || process.env.HTTP_PROXY
+    || process.env.https_proxy
+    || process.env.http_proxy
+    || undefined
+  )
+}
+
+/**
+ * Node's global `fetch` ignores HTTP(S)_PROXY unless `NODE_USE_ENV_PROXY=1`.
+ * Undici's EnvHttpProxyAgent honors the env vars (and NO_PROXY).
+ */
+function createDefaultFetch(): typeof fetch {
+  if (!resolveProxyUrl()) return globalThis.fetch
+  const agent = new EnvHttpProxyAgent()
+  const proxied = ((input: RequestInfo | URL, init?: RequestInit) =>
+    undiciFetch(input as string | URL, {
+      ...(init as Record<string, unknown>),
+      dispatcher: agent,
+    })) as unknown as typeof fetch
+  return proxied
 }
 
 export class TelegramClient implements TelegramClientLike {
@@ -72,7 +105,7 @@ export class TelegramClient implements TelegramClientLike {
       throw new Error('bot token is required')
     }
     this.token = token
-    this.fetchImpl = options.fetch ?? fetch
+    this.fetchImpl = options.fetch ?? createDefaultFetch()
     this.baseUrl = options.baseUrl ?? 'https://api.telegram.org'
     this.pollingTimeoutSec = options.pollingTimeoutSec ?? 30
   }
@@ -142,5 +175,9 @@ export class TelegramClient implements TelegramClientLike {
     const body: Record<string, unknown> = { callback_query_id: callbackQueryId }
     if (text !== undefined) body.text = text
     return this.call<boolean>('answerCallbackQuery', body)
+  }
+
+  async setMyCommands(commands: TelegramBotCommand[]): Promise<boolean> {
+    return this.call<boolean>('setMyCommands', { commands })
   }
 }

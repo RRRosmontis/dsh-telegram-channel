@@ -35,6 +35,10 @@ export interface InlineKeyboardButton {
 export interface InlineKeyboardMarkup {
     inline_keyboard: InlineKeyboardButton[][];
 }
+export interface TelegramBotCommand {
+    command: string;
+    description: string;
+}
 export interface TelegramClientOptions {
     fetch?: typeof fetch;
     baseUrl?: string;
@@ -46,6 +50,7 @@ export interface TelegramClientLike {
     sendMessage(chatId: number, text: string, parseMode?: string, replyMarkup?: InlineKeyboardMarkup): Promise<TelegramMessage>;
     sendChatAction(chatId: number, action: string): Promise<boolean>;
     answerCallbackQuery(callbackQueryId: string, text?: string): Promise<boolean>;
+    setMyCommands(commands: TelegramBotCommand[]): Promise<boolean>;
 }
 export declare class TelegramClient implements TelegramClientLike {
     private readonly token;
@@ -60,4 +65,5 @@ export declare class TelegramClient implements TelegramClientLike {
     sendMessage(chatId: number, text: string, parseMode?: string, replyMarkup?: InlineKeyboardMarkup): Promise<TelegramMessage>;
     sendChatAction(chatId: number, action: string): Promise<boolean>;
     answerCallbackQuery(callbackQueryId: string, text?: string): Promise<boolean>;
+    setMyCommands(commands: TelegramBotCommand[]): Promise<boolean>;
 }

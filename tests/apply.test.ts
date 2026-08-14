@@ -9,7 +9,7 @@ test('apply without token does not throw and does not start effect', () => {
       effects.push(name)
       return () => {}
     },
-    logger: { error() {}, warn() {} },
+    logger: { info() {}, error() {}, warn() {} },
     agents: {},
   } as any
   const prev = process.env.DSH_TELEGRAM_TOKEN

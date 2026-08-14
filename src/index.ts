@@ -21,6 +21,19 @@ export const Config: Schema<TelegramChannelConfig> = Schema.object({
   pollingTimeoutSec: Schema.number().default(30),
 })
 
+function resolveAllowedUserIds(config: TelegramChannelConfig): number[] {
+  if (config.allowedUserIds && config.allowedUserIds.length > 0) {
+    return config.allowedUserIds
+  }
+  const raw = process.env.DSH_TELEGRAM_ALLOWED_USER_IDS ?? ''
+  return raw
+    .split(/[,;\s]+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => Number(part))
+    .filter((n) => Number.isFinite(n) && n > 0)
+}
+
 export function apply(ctx: Context, config: TelegramChannelConfig): void {
   const token = (config.token && config.token.length > 0)
     ? config.token
@@ -33,7 +46,7 @@ export function apply(ctx: Context, config: TelegramChannelConfig): void {
   }
   const bridge = new TelegramBridge(ctx, {
     token,
-    allowedUserIds: config.allowedUserIds ?? [],
+    allowedUserIds: resolveAllowedUserIds(config),
     allowAllUsers: config.allowAllUsers ?? false,
     maxMessageLength: config.maxMessageLength ?? 4096,
     pollingTimeoutSec: config.pollingTimeoutSec ?? 30,

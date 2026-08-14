@@ -26,6 +26,7 @@ function fakeClient(
     },
     sendChatAction: async () => true,
     answerCallbackQuery: async () => true,
+    setMyCommands: async () => true,
     ...overrides,
   }
 }
@@ -56,7 +57,7 @@ function makeAgent(id: string, followups: UserMessage[]) {
 test('unauthorized user gets denied', async () => {
   const sent: SentMessage[] = []
   const ctx = {
-    logger: { warn() {}, error() {} },
+    logger: { info() {}, warn() {}, error() {} },
     agents: { list: () => [], roots: () => [], get: () => undefined },
     on() { return () => {} },
   }
@@ -75,7 +76,7 @@ test('plain text without bind prompts NEED_BIND and does not create', async () =
   const sent: SentMessage[] = []
   let createCalled = false
   const ctx = {
-    logger: { warn() {}, error() {} },
+    logger: { info() {}, warn() {}, error() {} },
     agents: {
       list: () => [],
       roots: () => [],
@@ -99,7 +100,7 @@ test('plain text without bind prompts NEED_BIND and does not create', async () =
 test('/sessions with no live agents shows NO_LIVE', async () => {
   const sent: SentMessage[] = []
   const ctx = {
-    logger: { warn() {}, error() {} },
+    logger: { info() {}, warn() {}, error() {} },
     agents: { list: () => [], roots: () => [], get: () => undefined },
     on() { return () => {} },
   }
@@ -119,7 +120,7 @@ test('/sessions lists live agents with bind callbacks', async () => {
   const followups: UserMessage[] = []
   const agent = makeAgent('live-aaa', followups)
   const ctx = {
-    logger: { warn() {}, error() {} },
+    logger: { info() {}, warn() {}, error() {} },
     agents: {
       list: () => [agent],
       roots: () => [agent],
@@ -145,7 +146,7 @@ test('callback bind then plain text followups live agent; mirror assistant to ch
   const agent = makeAgent('live-bbb', followups)
   let sessionListener: ((session: { id: ReturnType<typeof SessionId> }, event: unknown) => void) | undefined
   const ctx = {
-    logger: { warn() {}, error() {} },
+    logger: { info() {}, warn() {}, error() {} },
     agents: {
       list: () => [agent],
       roots: () => [agent],
@@ -202,7 +203,7 @@ test('/unbind clears binding without needing create/dispose', async () => {
   const followups: UserMessage[] = []
   const agent = makeAgent('live-ccc', followups)
   const ctx = {
-    logger: { warn() {}, error() {} },
+    logger: { info() {}, warn() {}, error() {} },
     agents: {
       list: () => [agent],
       roots: () => [agent],
