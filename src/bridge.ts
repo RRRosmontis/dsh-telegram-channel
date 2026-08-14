@@ -3,10 +3,10 @@ import type { AgentHandle } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm/message'
 import type { ContentBlock, TextBlock } from '@deepseek-ai/dsh-llm/types'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session/types'
-import { isAuthorized } from './auth.ts'
-import { TelegramClient, type TelegramClientLike, type TelegramUpdate } from './client.ts'
-import { MSG, parseCommand } from './commands.ts'
-import { markdownToHtml, splitMessage } from './format.ts'
+import { isAuthorized } from './auth.js'
+import { TelegramClient, type TelegramClientLike, type TelegramUpdate } from './client.js'
+import { MSG, parseCommand } from './commands.js'
+import { markdownToHtml, splitMessage } from './format.js'
 
 export interface TelegramBridgeOptions {
   token: string
