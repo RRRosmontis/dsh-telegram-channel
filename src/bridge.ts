@@ -23,7 +23,7 @@ export interface TelegramBridgeOptions {
 interface ChatState {
   chatId: number
   handle: AgentHandle
-  sessionId: ReturnType<typeof SessionId>
+  sessionId: string
 }
 
 interface SessionLike {
@@ -74,7 +74,9 @@ export class TelegramBridge {
   start(): void {
     this.disposeSessionListener?.()
     this.disposeSessionListener = this.ctx.on('session/event', (session, event) => {
-      void this.onSessionEvent(session, event)
+      void this.onSessionEvent(session, event).catch((err) => {
+        this.ctx.logger.error(this.redact(err))
+      })
     })
     if (!this.polling) {
       this.polling = true
@@ -201,8 +203,9 @@ export class TelegramBridge {
   }
 
   private findChatBySessionId(sessionId: ReturnType<typeof SessionId>): ChatState | undefined {
+    const id = String(sessionId)
     for (const chat of this.chats.values()) {
-      if (chat.sessionId === sessionId) return chat
+      if (chat.sessionId === id) return chat
     }
     return undefined
   }
@@ -212,8 +215,8 @@ export class TelegramBridge {
     const existing = this.chats.get(key)
     if (existing) return existing
 
-    const sessionId = SessionId(`telegram:${chatId}`)
-    const handle = await this.createAgent(sessionId)
+    const sessionId = String(SessionId(`telegram:${chatId}`))
+    const handle = await this.createAgent(SessionId(sessionId))
     const state: ChatState = { chatId, handle, sessionId }
     this.chats.set(key, state)
     return state
@@ -226,8 +229,8 @@ export class TelegramBridge {
       await existing.handle.dispose()
       this.chats.delete(key)
     }
-    const sessionId = SessionId(`telegram:${chatId}:${Date.now()}`)
-    const handle = await this.createAgent(sessionId)
+    const sessionId = String(SessionId(`telegram:${chatId}:${Date.now()}`))
+    const handle = await this.createAgent(SessionId(sessionId))
     this.chats.set(key, { chatId, handle, sessionId })
   }
 
@@ -258,7 +261,11 @@ export class TelegramBridge {
       try {
         await this.client.sendMessage(chatId, html, 'HTML')
       } catch {
-        await this.client.sendMessage(chatId, chunk)
+        try {
+          await this.client.sendMessage(chatId, chunk)
+        } catch (err) {
+          this.ctx.logger.error(this.redact(err))
+        }
       }
     }
   }
