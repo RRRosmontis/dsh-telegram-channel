@@ -89,12 +89,21 @@ export async function selectSessionModel(
   if (!api?.sessions?.selectModel) {
     throw new Error('apiProxy unavailable (use ctx.get / inject apiProxy)')
   }
-  const raw = await call(api.sessions.selectModel, {
+  // Omit undefined reasoningEffort — some validators treat explicit undefined as invalid.
+  const payload: {
+    sessionId: string
+    provider: string
+    model: string
+    reasoningEffort?: string
+  } = {
     sessionId,
     provider: selection.provider,
     model: selection.model,
-    reasoningEffort: selection.reasoningEffort,
-  })
+  }
+  if (selection.reasoningEffort !== undefined && selection.reasoningEffort !== '') {
+    payload.reasoningEffort = selection.reasoningEffort
+  }
+  const raw = await call(api.sessions.selectModel, payload)
   const value = unwrap<{ selected: { provider: string; model: string; reasoningEffort?: string } }>(raw)
   if (!value?.selected) {
     throw new Error(unwrapError(raw) ?? 'failed to select model')

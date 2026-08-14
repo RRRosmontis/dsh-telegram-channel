@@ -440,7 +440,99 @@ test('/model lists and selects via apiProxy', async () => {
     sessionId: 'live-mdl',
     provider: 'deepseek',
     model: 'chat',
-    reasoningEffort: undefined,
+  })
+  assert.match(sent.at(-1)!.text, /已切换模型/)
+})
+
+test('/model effort picker applies reasoningEffort', async () => {
+  const sent: SentMessage[] = []
+  const followups: UserMessage[] = []
+  const agent = makeAgent('live-eff', followups)
+  let selected: unknown
+  const ctx = {
+    logger: { info() {}, warn() {}, error() {} },
+    agents: {
+      list: () => [agent],
+      roots: () => [agent],
+      get: () => agent,
+    },
+    apiProxy: {
+      sessions: {
+        models: async () => rpcOk({
+          current: { provider: 'deepseek', model: 'reasoner' },
+          routable: true,
+          groups: [{
+            id: 'deepseek',
+            name: 'DeepSeek',
+            models: [{
+              id: 'reasoner',
+              name: 'Reasoner',
+              reasoning: {
+                efforts: [
+                  { id: 'high', name: 'High' },
+                  { id: 'max', name: 'Max' },
+                ],
+              },
+            }],
+          }],
+        }),
+        selectModel: async (req: { payload: unknown }) => {
+          selected = req.payload
+          const p = req.payload as { provider: string; model: string; reasoningEffort?: string }
+          return rpcOk({
+            selected: {
+              provider: p.provider,
+              model: p.model,
+              reasoningEffort: p.reasoningEffort,
+            },
+          })
+        },
+      },
+    },
+    on() { return () => {} },
+  }
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent),
+    sleep: async () => {},
+  })
+  await bridge.processUpdate({
+    update_id: 1,
+    callback_query: {
+      id: 'bind',
+      from: { id: 1 },
+      message: { message_id: 1, date: 0, chat: { id: 10, type: 'private' } },
+      data: `${BIND_CB_PREFIX}live-eff`,
+    },
+  })
+  await bridge.processUpdate(messageUpdate(10, 1, '/model', 2))
+  await bridge.processUpdate({
+    update_id: 3,
+    callback_query: {
+      id: 'pick-r',
+      from: { id: 1 },
+      message: { message_id: 2, date: 0, chat: { id: 10, type: 'private' } },
+      data: 'mdl:0',
+    },
+  })
+  assert.match(sent.at(-1)!.text, /reasoning effort|请选择/)
+  assert.equal(sent.at(-1)!.replyMarkup?.inline_keyboard?.[0]?.[0]?.callback_data, 'eff:0')
+  await bridge.processUpdate({
+    update_id: 4,
+    callback_query: {
+      id: 'pick-eff',
+      from: { id: 1 },
+      message: { message_id: 3, date: 0, chat: { id: 10, type: 'private' } },
+      data: 'eff:1',
+    },
+  })
+  assert.deepEqual(selected, {
+    sessionId: 'live-eff',
+    provider: 'deepseek',
+    model: 'reasoner',
+    reasoningEffort: 'max',
   })
   assert.match(sent.at(-1)!.text, /已切换模型/)
 })

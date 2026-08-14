@@ -19,6 +19,8 @@ export declare class TelegramBridge {
     private readonly maxMessageLength;
     private readonly bindings;
     private readonly pickers;
+    /** chatId → model awaiting reasoning-effort pick (kept outside picker so list refreshes won't drop it). */
+    private readonly pendingModels;
     private polling;
     private offset;
     private pollPromise;

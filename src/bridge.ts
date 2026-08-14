@@ -64,7 +64,8 @@ const WS_CB = 'ws:'
 const SID_CB = 'sid:'
 const BACK_WS_CB = 'wb'
 const MODEL_CB = 'mdl:'
-const EFFORT_CB = 'me:'
+/** Use eff: (not me:) — short prefix, no collision with other callbacks. */
+const EFFORT_CB = 'eff:'
 const BACK_MODEL_CB = 'mb'
 const MAX_BUTTONS = 40
 
@@ -94,6 +95,8 @@ export class TelegramBridge {
 
   private readonly bindings = new Map<string, Binding>()
   private readonly pickers = new Map<string, PickerState>()
+  /** chatId → model awaiting reasoning-effort pick (kept outside picker so list refreshes won't drop it). */
+  private readonly pendingModels = new Map<string, ModelOption>()
   private polling = false
   private offset: number | undefined
   private pollPromise: Promise<void> | undefined
@@ -149,6 +152,7 @@ export class TelegramBridge {
     // Never dispose host agents — only clear remote bindings.
     this.bindings.clear()
     this.pickers.clear()
+    this.pendingModels.clear()
     if (this.pollPromise) {
       await this.pollPromise.catch(() => {})
       this.pollPromise = undefined
@@ -261,20 +265,32 @@ export class TelegramBridge {
         await this.client.sendMessage(chatId, MSG.PICKER_STALE)
         return
       }
-      if (option.efforts && option.efforts.length > 0) {
-        if (picker) picker.pendingModel = option
+      const efforts = (option.efforts ?? []).filter((e) => e.id)
+      if (efforts.length === 1) {
+        // Single effort (often only "off") — apply immediately, no second tap.
+        await this.applyModel(chatId, cq.id, { ...option, efforts }, efforts[0]!.id)
+        return
+      }
+      if (efforts.length > 1) {
+        const pending = { ...option, efforts }
+        this.pendingModels.set(String(chatId), pending)
+        if (picker) picker.pendingModel = pending
         await this.client.answerCallbackQuery(cq.id)
-        await this.sendEffortPicker(chatId, option)
+        await this.sendEffortPicker(chatId, pending)
         return
       }
       await this.applyModel(chatId, cq.id, option)
       return
     }
-    if (data.startsWith(EFFORT_CB)) {
-      const index = Number(data.slice(EFFORT_CB.length))
-      const pending = picker?.pendingModel
+    if (data.startsWith(EFFORT_CB) || data.startsWith('me:')) {
+      // Accept legacy "me:" callbacks from older bot messages.
+      const rawIndex = data.startsWith(EFFORT_CB)
+        ? data.slice(EFFORT_CB.length)
+        : data.slice('me:'.length)
+      const index = Number(rawIndex)
+      const pending = this.pendingModels.get(String(chatId)) ?? picker?.pendingModel
       const effort = pending?.efforts?.[index]
-      if (!pending || !effort) {
+      if (!pending || !effort?.id) {
         await this.client.answerCallbackQuery(cq.id, '列表已过期')
         await this.client.sendMessage(chatId, MSG.PICKER_STALE)
         return
@@ -503,18 +519,24 @@ export class TelegramBridge {
       await this.client.sendMessage(chatId, MSG.NEED_BIND)
       return
     }
+    // Ensure session is live before selectModel (same as followup path).
+    await this.ensureLiveAgent(binding.sessionId)
     try {
       const selected = await selectSessionModel(this.ctx, binding.sessionId, {
         provider: option.provider,
         model: option.model,
         reasoningEffort,
       })
+      this.pendingModels.delete(String(chatId))
+      const picker = this.pickers.get(String(chatId))
+      if (picker) picker.pendingModel = undefined
       await this.client.answerCallbackQuery(callbackId, '已切换')
       await this.client.sendMessage(chatId, MSG.MODEL_SET(formatModel(selected)))
     } catch (err) {
       this.ctx.logger.warn(`dsh-telegram-channel: selectModel failed: ${this.redact(err)}`)
+      const detail = err instanceof Error ? err.message : String(err)
       await this.client.answerCallbackQuery(callbackId, '切换失败')
-      await this.client.sendMessage(chatId, MSG.MODEL_FAILED)
+      await this.client.sendMessage(chatId, MSG.MODEL_FAILED(detail))
     }
   }
 

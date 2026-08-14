@@ -20,7 +20,7 @@ export declare const MSG: {
     readonly MODEL_UNROUTABLE: (current: string) => string;
     readonly MODEL_EMPTY: (current: string) => string;
     readonly MODEL_SET: (selected: string) => string;
-    readonly MODEL_FAILED: "切换模型失败。请稍后重试或在 Web 中切换。";
+    readonly MODEL_FAILED: (detail?: string) => string;
     readonly unknown: (command: string) => string;
 };
 export type ParsedCommand = {

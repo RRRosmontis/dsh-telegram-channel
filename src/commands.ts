@@ -52,7 +52,11 @@ export const MSG = {
   MODEL_SET(selected: string): string {
     return `已切换模型：${selected}\n下一回合生效。`
   },
-  MODEL_FAILED: '切换模型失败。请稍后重试或在 Web 中切换。',
+  MODEL_FAILED(detail?: string): string {
+    const tip = '切换模型失败。请稍后重试或在 Web 中切换。'
+    if (!detail) return tip
+    return `${tip}\n详情：${detail}`
+  },
   unknown(command: string): string {
     return `未知命令 ${command}。发送 /help 查看可用命令。`
   },
