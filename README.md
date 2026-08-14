@@ -18,7 +18,7 @@ Telegram **手机遥控器** for DeepSeek Harness：附着本机正在跑的 Web
 
 ---
 
-### 一键安装（推荐）
+### 一键管理菜单（推荐）
 
 **先准备两样东西：**
 
@@ -31,66 +31,56 @@ Telegram **手机遥控器** for DeepSeek Harness：附着本机正在跑的 Web
 
 #### Windows
 
-> 下面命令请在 **PowerShell** 里执行（开始菜单搜 “Windows PowerShell” / “终端”）。  
-> 若窗口标题是 **命令提示符 / CMD**，先输入 `powershell` 回车，再贴命令。
-
-**方式 A — 远程一键（交互输入 Token / User ID）：**
+> 请在 **PowerShell** 执行。若当前是 **CMD**，用下面「CMD 一键」那行。
 
 ```powershell
 irm https://raw.githubusercontent.com/hi-wenw/dsh-telegram-channel/master/scripts/install.ps1 | iex
 ```
 
-等价写法（更不易混淆）：
-
-```powershell
-Invoke-RestMethod https://raw.githubusercontent.com/hi-wenw/dsh-telegram-channel/master/scripts/install.ps1 | Invoke-Expression
-```
-
-**CMD 用户一键进入并执行：**
+**CMD 一键：**
 
 ```bat
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/hi-wenw/dsh-telegram-channel/master/scripts/install.ps1 | iex"
 ```
 
-**方式 B — 带参数（不交互）：**
+启动后用**数字**选择：
 
-```powershell
-git clone https://github.com/hi-wenw/dsh-telegram-channel.git
-cd dsh-telegram-channel
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Token '这里粘贴Token' -UserId '这里粘贴数字ID'
+```
+1) 安装 / 重装插件（写入 Token + 白名单）
+2) 启动 dsh web（新窗口）
+3) 停止 dsh web
+4) 查看状态
+5) 打开浏览器
+0) 退出
 ```
 
-脚本会自动：
+也可直接指定动作（不进菜单）：
 
-1. 写入用户环境变量 `DSH_TELEGRAM_TOKEN`、`DSH_TELEGRAM_ALLOWED_USER_IDS`  
-2. 给 profile 补上 `allowBuilds`（防止 pnpm 拦截）  
-3. 执行 `dsh plugin --profile web add github:hi-wenw/dsh-telegram-channel`  
+```powershell
+.\scripts\install.ps1 -Action install -Token '...' -UserId '123456789'
+.\scripts\install.ps1 -Action start
+.\scripts\install.ps1 -Action stop
+.\scripts\install.ps1 -Action status
+```
 
-**不会**再 `insert` 同名插件行（避免 `duplicate loader entry id`）。
+安装时脚本会：写环境变量、补 `allowBuilds`、执行 `dsh plugin add`（**不会**再 insert 同名 id）。
 
 #### macOS / Linux
 
 ```bash
-export DSH_TELEGRAM_TOKEN='你的Token'
-export DSH_TELEGRAM_ALLOWED_USER_IDS='你的数字ID'
 curl -fsSL https://raw.githubusercontent.com/hi-wenw/dsh-telegram-channel/master/scripts/install.sh | bash
+# 同样出现数字菜单；或：
+# ./scripts/install.sh install --token '...' --user-id '...'
+# ./scripts/install.sh start|stop|status
 ```
-
-或克隆后：`./scripts/install.sh --token '...' --user-id '...'`
 
 ---
 
-### 安装后只用三步
+### 手机怎么用
 
-```powershell
-# 1. 关掉旧终端，新开一个，然后：
-dsh web
-
-# 2. 浏览器打开一个对话（保持运行）
-
-# 3. 手机对 Bot：
-#    /start  →  /sessions  →  点选  →  正常聊天
-```
+1. 菜单选 **2** 启动 `dsh web`（或自己运行 `dsh web`）  
+2. 浏览器打开一个对话并保持运行  
+3. 手机对 Bot：`/start` → `/sessions` → 点选 → 聊天  
 
 输入框旁的 **/** 菜单应有：`start` `sessions` `status` `unbind` `help`。
 
@@ -185,24 +175,29 @@ npm run build
 
 Telegram **mobile remote** for **live** DeepSeek Harness Web agents. Desktop/Web is the source of truth; the phone **attaches** (no parallel hidden agent).
 
-### One-click install (Windows)
+### One-click manager (Windows)
+
+Run in **PowerShell** (not CMD). Opens a number menu: install / start / stop / status / open browser.
 
 ```powershell
 irm https://raw.githubusercontent.com/hi-wenw/dsh-telegram-channel/master/scripts/install.ps1 | iex
 ```
 
-Or with params after clone:
+CMD:
 
-```powershell
-.\scripts\install.ps1 -Token '...' -UserId '123456789'
+```bat
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/hi-wenw/dsh-telegram-channel/master/scripts/install.ps1 | iex"
 ```
 
-The script sets user env vars, ensures `allowBuilds`, and runs `dsh plugin add`. Then:
+Direct actions:
 
 ```powershell
-dsh web
-# open a Web chat → phone: /sessions → bind
+.\scripts\install.ps1 -Action start
+.\scripts\install.ps1 -Action stop
+.\scripts\install.ps1 -Action install -Token '...' -UserId '123456789'
 ```
+
+The script sets user env vars, ensures `allowBuilds`, and runs `dsh plugin add`. After **start**, open a Web chat → phone: `/sessions` → bind.
 
 ### Unix
 
