@@ -2,7 +2,6 @@
 # Safe for: irm .../install.ps1 | iex
 # Also: powershell -File install.ps1 -Action start
 & {
-#Requires -Version 5.1
 <#
 .SYNOPSIS
   dsh-telegram-channel manager menu: install / start / stop / status.
