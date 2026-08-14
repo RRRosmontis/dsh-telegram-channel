@@ -1,6 +1,6 @@
 {
   "name": "dsh-telegram-channel",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "DeepSeek Harness Telegram mobile remote: bind live Web sessions (Codex-style), same trajectory, /sessions picker, unbind/clear — dsh-plugin",
   "keywords": [
     "telegram",
@@ -39,7 +39,12 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["lib", "cordis.patch.yml", "README.md", "LICENSE"],
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
   "license": "MIT",
   "dsh": {
     "bundle": {
@@ -50,7 +55,7 @@
     "build": "tsc -p tsconfig.json",
     "test": "node --import tsx --test tests/**/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prepare": "npm run build"
+    "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
