@@ -4,5 +4,3 @@
       config:
         token: ''
         allowedUserIds: [123456789]
-        provider: deepseek-official
-        model: deepseek-v4-flash

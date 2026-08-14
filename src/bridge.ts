@@ -1,11 +1,16 @@
 import type { Context } from '@deepseek-ai/cordis'
-import type { AgentHandle } from '@deepseek-ai/dsh-agent'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm/message'
 import type { ContentBlock, TextBlock } from '@deepseek-ai/dsh-llm/types'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session/types'
 import { isAuthorized } from './auth.js'
-import { TelegramClient, type TelegramClientLike, type TelegramUpdate } from './client.js'
-import { MSG, parseCommand } from './commands.js'
+import {
+  TelegramClient,
+  type InlineKeyboardMarkup,
+  type TelegramClientLike,
+  type TelegramUpdate,
+} from './client.js'
+import { BIND_CB_PREFIX, MSG, parseCommand } from './commands.js'
 import { markdownToHtml, splitMessage } from './format.js'
 
 export interface TelegramBridgeOptions {
@@ -14,17 +19,15 @@ export interface TelegramBridgeOptions {
   allowAllUsers: boolean
   client?: TelegramClientLike
   sleep?: (ms: number) => Promise<void>
-  provider?: string
-  model?: string
   maxMessageLength?: number
   pollingTimeoutSec?: number
-  cwd?: string
 }
 
-interface ChatState {
+/** chatId → bound live session id (string form of SessionId) */
+interface Binding {
   chatId: number
-  handle: AgentHandle
   sessionId: string
+  label: string
 }
 
 interface SessionLike {
@@ -40,6 +43,15 @@ function contentToText(content: readonly ContentBlock[]): string {
     .join('')
 }
 
+function shortLabel(agent: Agent, index: number): string {
+  const id = String(agent.id)
+  const tail = id.length > 12 ? id.slice(-12) : id
+  const cwd = (agent.session as { meta?: { cwd?: string } } | undefined)?.meta?.cwd
+  const cwdBit = cwd ? cwd.split(/[/\\]/).filter(Boolean).slice(-1)[0] : ''
+  const base = cwdBit ? `${cwdBit} · ${tail}` : `session ${index + 1} · ${tail}`
+  return base.length > 60 ? `${base.slice(0, 57)}...` : base
+}
+
 export class TelegramBridge {
   private readonly ctx: Context
   private readonly token: string
@@ -47,12 +59,9 @@ export class TelegramBridge {
   private readonly allowAllUsers: boolean
   private readonly client: TelegramClientLike
   private readonly sleep: (ms: number) => Promise<void>
-  private readonly provider: string
-  private readonly model: string
   private readonly maxMessageLength: number
-  private readonly cwd: string
 
-  private readonly chats = new Map<string, ChatState>()
+  private readonly bindings = new Map<string, Binding>()
   private polling = false
   private offset: number | undefined
   private pollPromise: Promise<void> | undefined
@@ -68,10 +77,7 @@ export class TelegramBridge {
       pollingTimeoutSec: options.pollingTimeoutSec ?? 30,
     })
     this.sleep = options.sleep ?? defaultSleep
-    this.provider = options.provider ?? 'deepseek-official'
-    this.model = options.model ?? 'deepseek-v4-flash'
     this.maxMessageLength = options.maxMessageLength ?? 4096
-    this.cwd = options.cwd ?? process.cwd()
   }
 
   start(): void {
@@ -94,9 +100,8 @@ export class TelegramBridge {
     this.pollAbort = undefined
     this.disposeSessionListener?.()
     this.disposeSessionListener = undefined
-    const disposals = [...this.chats.values()].map((chat) => chat.handle.dispose())
-    this.chats.clear()
-    await Promise.all(disposals)
+    // Never dispose host agents — only clear remote bindings.
+    this.bindings.clear()
     if (this.pollPromise) {
       await this.pollPromise.catch(() => {})
       this.pollPromise = undefined
@@ -104,6 +109,10 @@ export class TelegramBridge {
   }
 
   async processUpdate(update: TelegramUpdate): Promise<void> {
+    if (update.callback_query) {
+      await this.handleCallback(update)
+      return
+    }
     const message = update.message
     if (!message?.text) return
 
@@ -123,18 +132,131 @@ export class TelegramBridge {
       case 'help':
         await this.client.sendMessage(chatId, MSG.HELP)
         return
-      case 'new':
-        await this.resetChat(chatId)
-        await this.client.sendMessage(chatId, MSG.NEW_SESSION)
+      case 'sessions':
+        await this.sendSessionPicker(chatId)
+        return
+      case 'status':
+        await this.sendStatus(chatId)
+        return
+      case 'unbind':
+        this.bindings.delete(String(chatId))
+        await this.client.sendMessage(chatId, MSG.UNBOUND)
         return
       case 'unknown':
         await this.client.sendMessage(chatId, MSG.unknown(parsed.command))
         return
       case 'plain':
-        await this.ensureChat(chatId)
-        await this.followup(chatId, parsed.text)
+        await this.followupBound(chatId, parsed.text)
         return
     }
+  }
+
+  private async handleCallback(update: TelegramUpdate): Promise<void> {
+    const cq = update.callback_query!
+    const userId = cq.from.id
+    const chatId = cq.message?.chat.id
+    if (chatId === undefined) {
+      await this.client.answerCallbackQuery(cq.id)
+      return
+    }
+    if (!isAuthorized({ allowAllUsers: this.allowAllUsers, allowedUserIds: this.allowedUserIds, userId })) {
+      await this.client.answerCallbackQuery(cq.id, MSG.DENIED)
+      await this.client.sendMessage(chatId, MSG.DENIED)
+      return
+    }
+    const data = cq.data ?? ''
+    if (!data.startsWith(BIND_CB_PREFIX)) {
+      await this.client.answerCallbackQuery(cq.id)
+      return
+    }
+    const sessionId = data.slice(BIND_CB_PREFIX.length)
+    const agent = this.findLiveAgent(sessionId)
+    if (!agent) {
+      await this.client.answerCallbackQuery(cq.id, '会话不存在')
+      await this.client.sendMessage(chatId, MSG.GONE)
+      return
+    }
+    const label = shortLabel(agent, 0)
+    this.bindings.set(String(chatId), { chatId, sessionId: String(agent.id), label })
+    await this.client.answerCallbackQuery(cq.id, '已附着')
+    await this.client.sendMessage(chatId, MSG.BOUND(label))
+  }
+
+  private liveAgents(): Agent[] {
+    const agents = this.ctx.agents
+    if (typeof agents.roots === 'function') {
+      const roots = agents.roots()
+      if (roots.length > 0) return roots
+    }
+    if (typeof agents.list === 'function') return agents.list()
+    return []
+  }
+
+  private findLiveAgent(sessionId: string): Agent | undefined {
+    const agents = this.ctx.agents
+    if (typeof agents.get === 'function') {
+      try {
+        const found = agents.get(SessionId(sessionId))
+        if (found) return found
+      } catch {
+        // fall through to list scan
+      }
+    }
+    return this.liveAgents().find((a) => String(a.id) === sessionId)
+  }
+
+  private async sendSessionPicker(chatId: number): Promise<void> {
+    const agents = this.liveAgents()
+    if (agents.length === 0) {
+      await this.client.sendMessage(chatId, MSG.NO_LIVE)
+      return
+    }
+    const keyboard: InlineKeyboardMarkup = {
+      inline_keyboard: agents.map((agent, i) => {
+        const label = shortLabel(agent, i)
+        return [{ text: label, callback_data: `${BIND_CB_PREFIX}${String(agent.id)}` }]
+      }),
+    }
+    await this.client.sendMessage(
+      chatId,
+      `选择要遥控的本机会话（共 ${agents.length} 个）：`,
+      undefined,
+      keyboard,
+    )
+  }
+
+  private async sendStatus(chatId: number): Promise<void> {
+    const binding = this.bindings.get(String(chatId))
+    if (!binding) {
+      await this.client.sendMessage(chatId, MSG.STATUS_NONE)
+      return
+    }
+    const stillLive = this.findLiveAgent(binding.sessionId)
+    if (!stillLive) {
+      this.bindings.delete(String(chatId))
+      await this.client.sendMessage(chatId, MSG.GONE)
+      return
+    }
+    await this.client.sendMessage(chatId, MSG.STATUS_BOUND(binding.label))
+  }
+
+  private async followupBound(chatId: number, text: string): Promise<void> {
+    const binding = this.bindings.get(String(chatId))
+    if (!binding) {
+      await this.client.sendMessage(chatId, MSG.NEED_BIND)
+      return
+    }
+    const agent = this.findLiveAgent(binding.sessionId)
+    if (!agent) {
+      this.bindings.delete(String(chatId))
+      await this.client.sendMessage(chatId, MSG.GONE)
+      return
+    }
+    const message = createUserMessage({
+      content: [{ type: 'text', text }],
+      source: { kind: 'user' },
+    })
+    agent.followup(message)
   }
 
   private async pollLoop(): Promise<void> {
@@ -189,72 +311,20 @@ export class TelegramBridge {
   }
 
   private async onSessionEvent(session: SessionLike, event: SessionEvent): Promise<void> {
-    const chat = this.findChatBySessionId(session.id)
-    if (!chat) return
+    const id = String(session.id)
+    const targets = [...this.bindings.values()].filter((b) => b.sessionId === id)
+    if (targets.length === 0) return
 
     if (event.type === 'turn/start') {
-      await this.client.sendChatAction(chat.chatId, 'typing')
+      await Promise.all(targets.map((b) => this.client.sendChatAction(b.chatId, 'typing')))
       return
     }
 
     if (event.type === 'assistant/message') {
       const text = contentToText(event.data.message.content)
-      if (text) {
-        await this.deliver(chat.chatId, text)
-      }
+      if (!text) return
+      await Promise.all(targets.map((b) => this.deliver(b.chatId, text)))
     }
-  }
-
-  private findChatBySessionId(sessionId: ReturnType<typeof SessionId>): ChatState | undefined {
-    const id = String(sessionId)
-    for (const chat of this.chats.values()) {
-      if (chat.sessionId === id) return chat
-    }
-    return undefined
-  }
-
-  private async ensureChat(chatId: number): Promise<ChatState> {
-    const key = String(chatId)
-    const existing = this.chats.get(key)
-    if (existing) return existing
-
-    const sessionId = String(SessionId(`telegram:${chatId}`))
-    const handle = await this.createAgent(SessionId(sessionId))
-    const state: ChatState = { chatId, handle, sessionId }
-    this.chats.set(key, state)
-    return state
-  }
-
-  private async resetChat(chatId: number): Promise<void> {
-    const key = String(chatId)
-    const existing = this.chats.get(key)
-    if (existing) {
-      await existing.handle.dispose()
-      this.chats.delete(key)
-    }
-    const sessionId = String(SessionId(`telegram:${chatId}:${Date.now()}`))
-    const handle = await this.createAgent(SessionId(sessionId))
-    this.chats.set(key, { chatId, handle, sessionId })
-  }
-
-  private async createAgent(sessionId: ReturnType<typeof SessionId>): Promise<AgentHandle> {
-    return this.ctx.agents.create({
-      sessionId,
-      meta: { cwd: this.cwd },
-      agentOptions: {
-        provider: this.provider,
-        model: this.model,
-      },
-    })
-  }
-
-  private async followup(chatId: number, text: string): Promise<void> {
-    const chat = await this.ensureChat(chatId)
-    const message = createUserMessage({
-      content: [{ type: 'text', text }],
-      source: { kind: 'user' },
-    })
-    chat.handle.agent.followup(message)
   }
 
   private async deliver(chatId: number, markdown: string): Promise<void> {

@@ -9,22 +9,16 @@ export interface TelegramChannelConfig {
   token?: string
   allowedUserIds?: number[]
   allowAllUsers?: boolean
-  provider?: string
-  model?: string
   maxMessageLength?: number
   pollingTimeoutSec?: number
-  cwd?: string
 }
 
 export const Config: Schema<TelegramChannelConfig> = Schema.object({
   token: Schema.string().default(''),
   allowedUserIds: Schema.array(Schema.number()).default([]),
   allowAllUsers: Schema.boolean().default(false),
-  provider: Schema.string().default('deepseek-official'),
-  model: Schema.string().default('deepseek-v4-flash'),
   maxMessageLength: Schema.number().default(4096),
   pollingTimeoutSec: Schema.number().default(30),
-  cwd: Schema.string(),
 })
 
 export function apply(ctx: Context, config: TelegramChannelConfig): void {
@@ -41,11 +35,8 @@ export function apply(ctx: Context, config: TelegramChannelConfig): void {
     token,
     allowedUserIds: config.allowedUserIds ?? [],
     allowAllUsers: config.allowAllUsers ?? false,
-    provider: config.provider ?? 'deepseek-official',
-    model: config.model ?? 'deepseek-v4-flash',
     maxMessageLength: config.maxMessageLength ?? 4096,
     pollingTimeoutSec: config.pollingTimeoutSec ?? 30,
-    cwd: config.cwd ?? process.cwd(),
   })
   ctx.effect(() => {
     bridge.start()

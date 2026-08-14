@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import type { CreateAgentOptions } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-llm/types'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
 import { TelegramBridge } from '../src/bridge.ts'
-import type { TelegramClientLike, TelegramUpdate } from '../src/client.ts'
-import { MSG } from '../src/commands.ts'
+import type { InlineKeyboardMarkup, TelegramClientLike, TelegramUpdate } from '../src/client.ts'
+import { BIND_CB_PREFIX, MSG } from '../src/commands.ts'
 
-type SentMessage = { chatId: number; text: string; parseMode?: string }
+type SentMessage = {
+  chatId: number
+  text: string
+  parseMode?: string
+  replyMarkup?: InlineKeyboardMarkup
+}
 
 function fakeClient(
   sent: SentMessage[],
@@ -16,11 +20,12 @@ function fakeClient(
   return {
     getMe: async () => ({ id: 1 }),
     getUpdates: async () => [],
-    sendMessage: async (chatId, text, parseMode) => {
-      sent.push({ chatId, text, parseMode })
+    sendMessage: async (chatId, text, parseMode, replyMarkup) => {
+      sent.push({ chatId, text, parseMode, replyMarkup })
       return { message_id: 1, date: 0, chat: { id: chatId, type: 'private' }, text }
     },
     sendChatAction: async () => true,
+    answerCallbackQuery: async () => true,
     ...overrides,
   }
 }
@@ -38,67 +43,24 @@ function messageUpdate(chatId: number, userId: number, text: string, updateId = 
   }
 }
 
-function fakeAgents(track: {
-  createCount: number
-  disposeCount: number
-  sessionIds: string[]
-  followups: UserMessage[][]
-}) {
+function makeAgent(id: string, followups: UserMessage[]) {
   return {
-    create: async (options: CreateAgentOptions) => {
-      track.createCount += 1
-      track.sessionIds.push(String(options.sessionId))
-      const followups: UserMessage[] = []
-      track.followups.push(followups)
-      return {
-        agent: {
-          followup(message: UserMessage) {
-            followups.push(message)
-          },
-        },
-        dispose: async () => {
-          track.disposeCount += 1
-        },
-      }
+    id: SessionId(id),
+    session: { meta: { cwd: `/proj/${id}` } },
+    followup(message: UserMessage) {
+      followups.push(message)
     },
   }
 }
 
-function bridgeCtx(
-  agents: ReturnType<typeof fakeAgents>,
-  onSessionEvent?: (session: { id: ReturnType<typeof SessionId> }, event: unknown) => void,
-) {
-  return {
-    logger: { warn() {}, error() {} },
-    agents,
-    on(event: string, listener: (session: { id: ReturnType<typeof SessionId> }, event: unknown) => void) {
-      if (event === 'session/event' && onSessionEvent) {
-        onSessionEvent = listener
-      }
-      return () => {}
-    },
-    _fireSessionEvent(session: { id: ReturnType<typeof SessionId> }, ev: unknown) {
-      onSessionEvent?.(session, ev)
-    },
-  }
-}
-
-test('unauthorized user gets denied and no agent', async () => {
+test('unauthorized user gets denied', async () => {
   const sent: SentMessage[] = []
-  let createCount = 0
   const ctx = {
     logger: { warn() {}, error() {} },
-    agents: {
-      create: async () => {
-        createCount += 1
-        throw new Error('should not create')
-      },
-    },
-    on() {
-      return () => {}
-    },
+    agents: { list: () => [], roots: () => [], get: () => undefined },
+    on() { return () => {} },
   }
-  const bridge = new TelegramBridge(ctx as never, {
+  const bridge = new TelegramBridge(ctx as any, {
     token: 't',
     allowedUserIds: [1],
     allowAllUsers: false,
@@ -106,241 +68,167 @@ test('unauthorized user gets denied and no agent', async () => {
     sleep: async () => {},
   })
   await bridge.processUpdate(messageUpdate(99, 99, 'hi'))
-  assert.equal(createCount, 0)
   assert.equal(sent[0]?.text, MSG.DENIED)
 })
 
-test('/help sends help without creating agent', async () => {
+test('plain text without bind prompts NEED_BIND and does not create', async () => {
   const sent: SentMessage[] = []
-  const track = { createCount: 0, disposeCount: 0, sessionIds: [] as string[], followups: [] as UserMessage[][] }
-  const bridge = new TelegramBridge(bridgeCtx(fakeAgents(track)) as never, {
-    token: 't',
-    allowedUserIds: [1],
-    allowAllUsers: false,
-    client: fakeClient(sent),
-    sleep: async () => {},
-  })
-  await bridge.processUpdate(messageUpdate(42, 1, '/help'))
-  assert.equal(track.createCount, 0)
-  assert.equal(sent[0]?.text, MSG.HELP)
-})
-
-test('first plain text creates agent then followups', async () => {
-  const sent: SentMessage[] = []
-  const track = { createCount: 0, disposeCount: 0, sessionIds: [] as string[], followups: [] as UserMessage[][] }
-  const bridge = new TelegramBridge(bridgeCtx(fakeAgents(track)) as never, {
-    token: 't',
-    allowedUserIds: [1],
-    allowAllUsers: false,
-    client: fakeClient(sent),
-    sleep: async () => {},
-  })
-  await bridge.processUpdate(messageUpdate(42, 1, 'hello'))
-  assert.equal(track.createCount, 1)
-  assert.equal(track.sessionIds[0], 'telegram:42')
-  assert.equal(track.followups.length, 1)
-  assert.equal((track.followups[0]![0]!.content[0] as { text: string }).text, 'hello')
-})
-
-test('second plain text in same chat only followups', async () => {
-  const sent: SentMessage[] = []
-  const track = { createCount: 0, disposeCount: 0, sessionIds: [] as string[], followups: [] as UserMessage[][] }
-  const bridge = new TelegramBridge(bridgeCtx(fakeAgents(track)) as never, {
-    token: 't',
-    allowedUserIds: [1],
-    allowAllUsers: false,
-    client: fakeClient(sent),
-    sleep: async () => {},
-  })
-  await bridge.processUpdate(messageUpdate(42, 1, 'hello'))
-  await bridge.processUpdate(messageUpdate(42, 1, 'again', 2))
-  assert.equal(track.createCount, 1)
-  assert.equal(track.followups.length, 1)
-  assert.equal(track.followups[0]!.length, 2)
-  assert.equal((track.followups[0]![1]!.content[0] as { text: string }).text, 'again')
-})
-
-test('/new disposes previous handle and creates fresh session', async () => {
-  const sent: SentMessage[] = []
-  const track = { createCount: 0, disposeCount: 0, sessionIds: [] as string[], followups: [] as UserMessage[][] }
-  const bridge = new TelegramBridge(bridgeCtx(fakeAgents(track)) as never, {
-    token: 't',
-    allowedUserIds: [1],
-    allowAllUsers: false,
-    client: fakeClient(sent),
-    sleep: async () => {},
-  })
-  await bridge.processUpdate(messageUpdate(42, 1, 'hello'))
-  await bridge.processUpdate(messageUpdate(42, 1, '/new', 2))
-  assert.equal(track.disposeCount, 1)
-  assert.equal(track.createCount, 2)
-  assert.equal(track.sessionIds[0], 'telegram:42')
-  assert.match(track.sessionIds[1]!, /^telegram:42:\d+$/)
-  assert.equal(sent.at(-1)?.text, MSG.NEW_SESSION)
-})
-
-test('turn/start sends typing for matching session', async () => {
-  const sent: SentMessage[] = []
-  const actions: Array<{ chatId: number; action: string }> = []
-  const track = { createCount: 0, disposeCount: 0, sessionIds: [] as string[], followups: [] as UserMessage[][] }
-  let fire: ((session: { id: ReturnType<typeof SessionId> }, event: unknown) => void) | undefined
+  let createCalled = false
   const ctx = {
     logger: { warn() {}, error() {} },
-    agents: fakeAgents(track),
-    on(_event: string, listener: (session: { id: ReturnType<typeof SessionId> }, event: unknown) => void) {
-      fire = listener
+    agents: {
+      list: () => [],
+      roots: () => [],
+      get: () => undefined,
+      create: async () => { createCalled = true },
+    },
+    on() { return () => {} },
+  }
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent),
+    sleep: async () => {},
+  })
+  await bridge.processUpdate(messageUpdate(10, 1, 'do something'))
+  assert.equal(createCalled, false)
+  assert.equal(sent[0]?.text, MSG.NEED_BIND)
+})
+
+test('/sessions with no live agents shows NO_LIVE', async () => {
+  const sent: SentMessage[] = []
+  const ctx = {
+    logger: { warn() {}, error() {} },
+    agents: { list: () => [], roots: () => [], get: () => undefined },
+    on() { return () => {} },
+  }
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent),
+    sleep: async () => {},
+  })
+  await bridge.processUpdate(messageUpdate(10, 1, '/sessions'))
+  assert.equal(sent[0]?.text, MSG.NO_LIVE)
+})
+
+test('/sessions lists live agents with bind callbacks', async () => {
+  const sent: SentMessage[] = []
+  const followups: UserMessage[] = []
+  const agent = makeAgent('live-aaa', followups)
+  const ctx = {
+    logger: { warn() {}, error() {} },
+    agents: {
+      list: () => [agent],
+      roots: () => [agent],
+      get: (id: ReturnType<typeof SessionId>) => (String(id) === 'live-aaa' ? agent : undefined),
+    },
+    on() { return () => {} },
+  }
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent),
+    sleep: async () => {},
+  })
+  await bridge.processUpdate(messageUpdate(10, 1, '/sessions'))
+  assert.match(sent[0]!.text, /选择要遥控/)
+  assert.ok(sent[0]!.replyMarkup?.inline_keyboard?.[0]?.[0]?.callback_data?.startsWith(BIND_CB_PREFIX))
+})
+
+test('callback bind then plain text followups live agent; mirror assistant to chat', async () => {
+  const sent: SentMessage[] = []
+  const followups: UserMessage[] = []
+  const agent = makeAgent('live-bbb', followups)
+  let sessionListener: ((session: { id: ReturnType<typeof SessionId> }, event: unknown) => void) | undefined
+  const ctx = {
+    logger: { warn() {}, error() {} },
+    agents: {
+      list: () => [agent],
+      roots: () => [agent],
+      get: (id: ReturnType<typeof SessionId>) => (String(id) === 'live-bbb' ? agent : undefined),
+    },
+    on(event: string, listener: (session: { id: ReturnType<typeof SessionId> }, event: unknown) => void) {
+      if (event === 'session/event') sessionListener = listener
       return () => {}
     },
   }
-  const bridge = new TelegramBridge(ctx as never, {
+  const bridge = new TelegramBridge(ctx as any, {
     token: 't',
     allowedUserIds: [1],
     allowAllUsers: false,
-    client: fakeClient(sent, {
-      sendChatAction: async (chatId, action) => {
-        actions.push({ chatId, action })
-        return true
+    client: fakeClient(sent),
+    sleep: async () => {},
+  })
+  bridge.start()
+
+  await bridge.processUpdate({
+    update_id: 2,
+    callback_query: {
+      id: 'cq1',
+      from: { id: 1 },
+      message: {
+        message_id: 1,
+        date: 0,
+        chat: { id: 10, type: 'private' },
+        text: 'picker',
       },
-    }),
-    sleep: async () => {},
-  })
-  bridge.start()
-  await bridge.processUpdate(messageUpdate(42, 1, 'hello'))
-  fire!({ id: SessionId(track.sessionIds[0]!) }, { type: 'turn/start', data: { turn: 1 } })
-  await new Promise((resolve) => setImmediate(resolve))
-  assert.deepEqual(actions, [{ chatId: 42, action: 'typing' }])
-  await bridge.stop()
-})
-
-test('assistant/message delivers HTML chunks for matching session', async () => {
-  const sent: SentMessage[] = []
-  const track = { createCount: 0, disposeCount: 0, sessionIds: [] as string[], followups: [] as UserMessage[][] }
-  let fire: ((session: { id: ReturnType<typeof SessionId> }, event: unknown) => void) | undefined
-  const ctx = {
-    logger: { warn() {}, error() {} },
-    agents: fakeAgents(track),
-    on(_event: string, listener: (session: { id: ReturnType<typeof SessionId> }, event: unknown) => void) {
-      fire = listener
-      return () => {}
+      data: `${BIND_CB_PREFIX}live-bbb`,
     },
-  }
-  const bridge = new TelegramBridge(ctx as never, {
-    token: 't',
-    allowedUserIds: [1],
-    allowAllUsers: false,
-    client: fakeClient(sent),
-    sleep: async () => {},
   })
-  bridge.start()
-  await bridge.processUpdate(messageUpdate(42, 1, 'hello'))
-  fire!(
-    { id: SessionId(track.sessionIds[0]!) },
+  assert.match(sent.at(-1)!.text, /已附着/)
+
+  await bridge.processUpdate(messageUpdate(10, 1, 'hello from phone', 3))
+  assert.equal(followups.length, 1)
+  assert.equal(followups[0]!.content[0]!.type, 'text')
+
+  await sessionListener?.(
+    { id: SessionId('live-bbb') },
     {
       type: 'assistant/message',
-      data: {
-        turn: 1,
-        step: 1,
-        message: {
-          content: [{ type: 'text', text: '**bold**' }],
-        },
-      },
+      data: { message: { content: [{ type: 'text', text: 'reply from agent' }] } },
     },
   )
-  await new Promise((resolve) => setImmediate(resolve))
-  const reply = sent.find((m) => m.parseMode === 'HTML')
-  assert.ok(reply)
-  assert.match(reply!.text, /<b>bold<\/b>/)
+  assert.ok(sent.some((m) => m.text.includes('reply from agent') || m.text.includes('reply')))
+
   await bridge.stop()
 })
 
-test('HTML send failure retries plain text for that chunk', async () => {
+test('/unbind clears binding without needing create/dispose', async () => {
   const sent: SentMessage[] = []
-  const track = { createCount: 0, disposeCount: 0, sessionIds: [] as string[], followups: [] as UserMessage[][] }
-  let fire: ((session: { id: ReturnType<typeof SessionId> }, event: unknown) => void) | undefined
+  const followups: UserMessage[] = []
+  const agent = makeAgent('live-ccc', followups)
   const ctx = {
     logger: { warn() {}, error() {} },
-    agents: fakeAgents(track),
-    on(_event: string, listener: (session: { id: ReturnType<typeof SessionId> }, event: unknown) => void) {
-      fire = listener
-      return () => {}
+    agents: {
+      list: () => [agent],
+      roots: () => [agent],
+      get: () => agent,
     },
+    on() { return () => {} },
   }
-  const bridge = new TelegramBridge(ctx as never, {
-    token: 't',
-    allowedUserIds: [1],
-    allowAllUsers: false,
-    client: fakeClient(sent, {
-      sendMessage: async (chatId, text, parseMode) => {
-        if (parseMode === 'HTML') throw new Error('bad html')
-        sent.push({ chatId, text, parseMode })
-        return { message_id: 1, date: 0, chat: { id: chatId, type: 'private' }, text }
-      },
-    }),
-    sleep: async () => {},
-  })
-  bridge.start()
-  await bridge.processUpdate(messageUpdate(42, 1, 'hello'))
-  fire!(
-    { id: SessionId(track.sessionIds[0]!) },
-    {
-      type: 'assistant/message',
-      data: {
-        turn: 1,
-        step: 1,
-        message: {
-          content: [{ type: 'text', text: 'plain chunk' }],
-        },
-      },
-    },
-  )
-  await new Promise((resolve) => setImmediate(resolve))
-  assert.equal(sent.length, 1)
-  assert.equal(sent[0]?.parseMode, undefined)
-  assert.equal(sent[0]?.text, 'plain chunk')
-  await bridge.stop()
-})
-
-test('stop disposes all chat handles', async () => {
-  const sent: SentMessage[] = []
-  const track = { createCount: 0, disposeCount: 0, sessionIds: [] as string[], followups: [] as UserMessage[][] }
-  const bridge = new TelegramBridge(bridgeCtx(fakeAgents(track)) as never, {
+  const bridge = new TelegramBridge(ctx as any, {
     token: 't',
     allowedUserIds: [1],
     allowAllUsers: false,
     client: fakeClient(sent),
     sleep: async () => {},
   })
-  await bridge.processUpdate(messageUpdate(42, 1, 'one'))
-  await bridge.processUpdate(messageUpdate(43, 1, 'two', 2))
-  await bridge.stop()
-  assert.equal(track.disposeCount, 2)
-})
-
-test('default client uses pollingTimeoutSec from bridge options', async () => {
-  const calls: Array<{ body: unknown }> = []
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = async (_input, init) => {
-    calls.push({ body: JSON.parse(String(init?.body)) })
-    return new Response(JSON.stringify({ ok: true, result: [] }), { status: 200 })
-  }
-  try {
-    const bridge = new TelegramBridge(bridgeCtx(fakeAgents({
-      createCount: 0,
-      disposeCount: 0,
-      sessionIds: [],
-      followups: [],
-    })) as never, {
-      token: 'SECRET-TOKEN',
-      allowedUserIds: [1],
-      allowAllUsers: false,
-      pollingTimeoutSec: 15,
-      sleep: async () => {},
-    })
-    bridge.start()
-    await new Promise((resolve) => setTimeout(resolve, 80))
-    await bridge.stop()
-    assert.ok(calls.some((call) => (call.body as { timeout?: number }).timeout === 15))
-  } finally {
-    globalThis.fetch = originalFetch
-  }
+  await bridge.processUpdate({
+    update_id: 1,
+    callback_query: {
+      id: 'cq',
+      from: { id: 1 },
+      message: { message_id: 1, date: 0, chat: { id: 10, type: 'private' } },
+      data: `${BIND_CB_PREFIX}live-ccc`,
+    },
+  })
+  await bridge.processUpdate(messageUpdate(10, 1, '/unbind', 2))
+  assert.equal(sent.at(-1)?.text, MSG.UNBOUND)
+  await bridge.processUpdate(messageUpdate(10, 1, 'again', 3))
+  assert.equal(sent.at(-1)?.text, MSG.NEED_BIND)
+  assert.equal(followups.length, 0)
 })

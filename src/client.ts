@@ -20,9 +20,26 @@ export interface TelegramMessage {
   text?: string
 }
 
+export interface TelegramCallbackQuery {
+  id: string
+  from: TelegramUser
+  message?: TelegramMessage
+  data?: string
+}
+
 export interface TelegramUpdate {
   update_id: number
   message?: TelegramMessage
+  callback_query?: TelegramCallbackQuery
+}
+
+export interface InlineKeyboardButton {
+  text: string
+  callback_data: string
+}
+
+export interface InlineKeyboardMarkup {
+  inline_keyboard: InlineKeyboardButton[][]
 }
 
 export interface TelegramClientOptions {
@@ -34,8 +51,14 @@ export interface TelegramClientOptions {
 export interface TelegramClientLike {
   getMe(): Promise<TelegramUser>
   getUpdates(offset?: number): Promise<TelegramUpdate[]>
-  sendMessage(chatId: number, text: string, parseMode?: string): Promise<TelegramMessage>
+  sendMessage(
+    chatId: number,
+    text: string,
+    parseMode?: string,
+    replyMarkup?: InlineKeyboardMarkup,
+  ): Promise<TelegramMessage>
   sendChatAction(chatId: number, action: string): Promise<boolean>
+  answerCallbackQuery(callbackQueryId: string, text?: string): Promise<boolean>
 }
 
 export class TelegramClient implements TelegramClientLike {
@@ -87,7 +110,7 @@ export class TelegramClient implements TelegramClientLike {
   async getUpdates(offset?: number): Promise<TelegramUpdate[]> {
     const body: Record<string, unknown> = {
       timeout: this.pollingTimeoutSec,
-      allowed_updates: ['message'],
+      allowed_updates: ['message', 'callback_query'],
     }
     if (offset !== undefined) {
       body.offset = offset
@@ -95,15 +118,29 @@ export class TelegramClient implements TelegramClientLike {
     return this.call<TelegramUpdate[]>('getUpdates', body)
   }
 
-  async sendMessage(chatId: number, text: string, parseMode?: string): Promise<TelegramMessage> {
+  async sendMessage(
+    chatId: number,
+    text: string,
+    parseMode?: string,
+    replyMarkup?: InlineKeyboardMarkup,
+  ): Promise<TelegramMessage> {
     const body: Record<string, unknown> = { chat_id: chatId, text }
     if (parseMode !== undefined) {
       body.parse_mode = parseMode
+    }
+    if (replyMarkup !== undefined) {
+      body.reply_markup = replyMarkup
     }
     return this.call<TelegramMessage>('sendMessage', body)
   }
 
   async sendChatAction(chatId: number, action: string): Promise<boolean> {
     return this.call<boolean>('sendChatAction', { chat_id: chatId, action })
+  }
+
+  async answerCallbackQuery(callbackQueryId: string, text?: string): Promise<boolean> {
+    const body: Record<string, unknown> = { callback_query_id: callbackQueryId }
+    if (text !== undefined) body.text = text
+    return this.call<boolean>('answerCallbackQuery', body)
   }
 }

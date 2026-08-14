@@ -1,23 +1,25 @@
 {
   "name": "dsh-telegram-channel",
-  "version": "0.1.0",
-  "description": "DeepSeek Harness Telegram Bot / mobile remote channel Cordis plugin (dsh-plugin): long poll, per-chat agents, /new /clear remove session, allowlist",
+  "version": "0.2.0",
+  "description": "DeepSeek Harness Telegram mobile remote: bind live Web sessions (Codex-style), same trajectory, /sessions picker, unbind/clear — dsh-plugin",
   "keywords": [
     "telegram",
     "bot",
     "mobile",
-    "channel",
     "remote",
+    "channel",
+    "sessions",
+    "bind",
+    "unbind",
+    "remove",
+    "clear",
     "deepseek",
     "deepseek-harness",
     "dsh",
     "dsh-plugin",
     "cordis",
     "agent",
-    "remove",
-    "clear",
-    "allowlist",
-    "long-polling"
+    "live-session"
   ],
   "repository": {
     "type": "git",
