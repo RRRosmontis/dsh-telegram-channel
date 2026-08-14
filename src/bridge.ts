@@ -17,6 +17,7 @@ export interface TelegramBridgeOptions {
   provider?: string
   model?: string
   maxMessageLength?: number
+  pollingTimeoutSec?: number
   cwd?: string
 }
 
@@ -63,7 +64,9 @@ export class TelegramBridge {
     this.token = options.token
     this.allowedUserIds = options.allowedUserIds
     this.allowAllUsers = options.allowAllUsers
-    this.client = options.client ?? new TelegramClient(options.token)
+    this.client = options.client ?? new TelegramClient(options.token, {
+      pollingTimeoutSec: options.pollingTimeoutSec ?? 30,
+    })
     this.sleep = options.sleep ?? defaultSleep
     this.provider = options.provider ?? 'deepseek-official'
     this.model = options.model ?? 'deepseek-v4-flash'

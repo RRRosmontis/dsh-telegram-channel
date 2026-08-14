@@ -44,6 +44,7 @@ export function apply(ctx: Context, config: TelegramChannelConfig): void {
     provider: config.provider ?? 'deepseek-official',
     model: config.model ?? 'deepseek-v4-flash',
     maxMessageLength: config.maxMessageLength ?? 4096,
+    pollingTimeoutSec: config.pollingTimeoutSec ?? 30,
     cwd: config.cwd ?? process.cwd(),
   })
   ctx.effect(() => {

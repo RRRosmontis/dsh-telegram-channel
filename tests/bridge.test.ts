@@ -315,3 +315,32 @@ test('stop disposes all chat handles', async () => {
   await bridge.stop()
   assert.equal(track.disposeCount, 2)
 })
+
+test('default client uses pollingTimeoutSec from bridge options', async () => {
+  const calls: Array<{ body: unknown }> = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (_input, init) => {
+    calls.push({ body: JSON.parse(String(init?.body)) })
+    return new Response(JSON.stringify({ ok: true, result: [] }), { status: 200 })
+  }
+  try {
+    const bridge = new TelegramBridge(bridgeCtx(fakeAgents({
+      createCount: 0,
+      disposeCount: 0,
+      sessionIds: [],
+      followups: [],
+    })) as never, {
+      token: 'SECRET-TOKEN',
+      allowedUserIds: [1],
+      allowAllUsers: false,
+      pollingTimeoutSec: 15,
+      sleep: async () => {},
+    })
+    bridge.start()
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    await bridge.stop()
+    assert.ok(calls.some((call) => (call.body as { timeout?: number }).timeout === 15))
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
