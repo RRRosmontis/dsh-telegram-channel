@@ -117,13 +117,15 @@ curl -fsSL https://raw.githubusercontent.com/hi-wenw/dsh-telegram-channel/master
 1. 菜单选 **2** 启动 `dsh web`（或自己运行 `dsh web`）  
 2. 浏览器里可看到工作区与会话（归档会话不会出现在手机列表）  
 3. 手机对 Bot：`/start` → `/sessions` → 选工作区 → 选会话 → 聊天  
-4. 需要换模型时：`/model` → 点选（与 Web 同 API，下一回合生效）
+4. 需要换模型时：`/model` → 点选（与 Web 同 API，下一回合生效）  
+5. 续接上下文：附着后点 **查看上次对话**，或发 `/last`
 
-输入框旁的 **/** 菜单应有：`start` `sessions` `model` `status` `unbind` `help`。
+输入框旁的 **/** 菜单应有：`start` `sessions` `last` `model` `status` `unbind` `help`。
 
 | 命令 | 作用 |
 |---|---|
 | `/sessions` | 先列工作区，再列该工作区会话（与 Web 对齐，排除归档/空白/子代理）；冷会话附着时会自动 resume |
+| `/last` | 查看绑定会话的**上次问答**（附着后也会出现「查看上次对话」按钮） |
 | `/model` | 切换当前绑定会话的模型 |
 | `/status` | 当前绑定 |
 | `/unbind` | 只断开手机，**不关**电脑会话 |

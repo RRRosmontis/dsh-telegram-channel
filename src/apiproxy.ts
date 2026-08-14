@@ -3,6 +3,7 @@ import type { Context } from '@deepseek-ai/cordis'
 /** Loose ApiProxy surface used by catalog + model helpers. */
 export type ApiProxySessions = {
   list?: (req: { rpcId: string; payload: unknown }) => Promise<unknown>
+  history?: (req: { rpcId: string; payload: unknown }) => Promise<unknown>
   models?: (req: { rpcId: string; payload: unknown }) => Promise<unknown>
   selectModel?: (req: { rpcId: string; payload: unknown }) => Promise<unknown>
 }

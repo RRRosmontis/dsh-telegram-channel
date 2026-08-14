@@ -20,8 +20,9 @@ import {
   type TelegramClientLike,
   type TelegramUpdate,
 } from './client.js'
-import { MSG, parseCommand } from './commands.js'
+import { MSG, LAST_CB, parseCommand } from './commands.js'
 import { markdownToHtml, splitMessage } from './format.js'
+import { formatLastTurn, loadLastTurn } from './history.js'
 import { describeAgent, displayLabel } from './label.js'
 import {
   formatModel,
@@ -66,6 +67,12 @@ const MODEL_CB = 'mdl:'
 const EFFORT_CB = 'me:'
 const BACK_MODEL_CB = 'mb'
 const MAX_BUTTONS = 40
+
+function lastContextKeyboard(): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [[{ text: '查看上次对话', callback_data: LAST_CB }]],
+  }
+}
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
@@ -115,6 +122,7 @@ export class TelegramBridge {
     void this.client.setMyCommands([
       { command: 'start', description: '欢迎与用法' },
       { command: 'sessions', description: '按工作区列出并附着会话' },
+      { command: 'last', description: '查看上次问答（续接上下文）' },
       { command: 'model', description: '切换当前绑定会话的模型' },
       { command: 'status', description: '查看当前绑定' },
       { command: 'unbind', description: '断开手机绑定（不关闭本机会话）' },
@@ -174,6 +182,9 @@ export class TelegramBridge {
       case 'sessions':
         await this.sendWorkspacePicker(chatId)
         return
+      case 'last':
+        await this.sendLastTurn(chatId)
+        return
       case 'model':
         await this.sendModelPicker(chatId)
         return
@@ -210,6 +221,11 @@ export class TelegramBridge {
     const data = cq.data ?? ''
     const picker = this.pickers.get(String(chatId))
 
+    if (data === LAST_CB) {
+      await this.client.answerCallbackQuery(cq.id)
+      await this.sendLastTurn(chatId)
+      return
+    }
     if (data === BACK_WS_CB) {
       await this.client.answerCallbackQuery(cq.id)
       await this.sendWorkspacePicker(chatId, picker?.catalog)
@@ -384,7 +400,24 @@ export class TelegramBridge {
       : displayLabel(parts)
     this.bindings.set(String(chatId), { chatId, sessionId: String(agent.id), label })
     await this.client.answerCallbackQuery(callbackId, '已附着')
-    await this.client.sendMessage(chatId, MSG.BOUND(label))
+    await this.client.sendMessage(chatId, MSG.BOUND(label), undefined, lastContextKeyboard())
+  }
+
+  private async sendLastTurn(chatId: number): Promise<void> {
+    const binding = this.bindings.get(String(chatId))
+    if (!binding) {
+      await this.client.sendMessage(chatId, MSG.NEED_BIND)
+      return
+    }
+    const agent = await this.ensureLiveAgent(binding.sessionId)
+    try {
+      const turn = await loadLastTurn(this.ctx, binding.sessionId, agent)
+      const text = formatLastTurn(turn)
+      await this.deliver(chatId, text)
+    } catch (err) {
+      this.ctx.logger.warn(`dsh-telegram-channel: /last failed: ${this.redact(err)}`)
+      await this.client.sendMessage(chatId, MSG.LAST_FAILED)
+    }
   }
 
   private async sendModelPicker(chatId: number): Promise<void> {

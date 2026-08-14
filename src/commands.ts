@@ -7,6 +7,7 @@ export const MSG = {
   ].join('\n'),
   HELP: [
     '/sessions — 按工作区列出本机会话（与 Web 对齐，排除归档）并附着',
+    '/last — 查看绑定会话的上次问答（便于续接）',
     '/model — 切换当前绑定会话的模型（下一回合生效）',
     '/status — 查看当前绑定',
     '/unbind — 断开绑定（不关闭本机会话）',
@@ -25,7 +26,7 @@ export const MSG = {
   PICKER_STALE: '列表已过期，请重新发送 /sessions。',
   RESUME_FAILED: '无法附着该会话（resume 失败）。请确认会话存在于 Web，或先在电脑打开后再试。',
   BOUND(label: string): string {
-    return `已附着本机会话：${label}\n此后消息将进入该会话（与 Web 同轨迹）。`
+    return `已附着本机会话：${label}\n此后消息将进入该会话（与 Web 同轨迹）。\n需要续接时可点「查看上次对话」，或发送 /last。`
   },
   UNBOUND: '已断开绑定。本机会话仍在运行。',
   STATUS_NONE: '当前未绑定任何本机会话。发送 /sessions 选择。',
@@ -36,6 +37,7 @@ export const MSG = {
     return `当前绑定：${label}\n（会话当前未在内存中运行；发消息时会自动 resume。）`
   },
   GONE: '绑定的会话已不可用。请重新 /sessions。',
+  LAST_FAILED: '无法读取上次对话。请确认已绑定，且本机 dsh web / apiProxy 可用。',
   MODEL_UNAVAILABLE(detail?: string): string {
     const tip = '无法读取模型列表。请确认已绑定会话，且本机 dsh web 已加载 host-apiproxy。'
     if (!detail) return tip
@@ -60,6 +62,7 @@ export type ParsedCommand =
   | { type: 'start'; text: string }
   | { type: 'help'; text: string }
   | { type: 'sessions'; text: string }
+  | { type: 'last'; text: string }
   | { type: 'model'; text: string }
   | { type: 'status'; text: string }
   | { type: 'unbind'; text: string }
@@ -78,6 +81,9 @@ export function parseCommand(text: string): ParsedCommand {
     case '/sessions':
     case '/list':
       return { type: 'sessions', text }
+    case '/last':
+    case '/context':
+      return { type: 'last', text }
     case '/model':
       return { type: 'model', text }
     case '/status':
@@ -92,3 +98,6 @@ export function parseCommand(text: string): ParsedCommand {
 
 /** @deprecated Prefer short index callbacks (ws:/sid:); kept for old messages. */
 export const BIND_CB_PREFIX = 'bind:'
+
+/** Inline button: fetch last Q/A for the bound session. */
+export const LAST_CB = 'last'

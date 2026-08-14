@@ -5,6 +5,10 @@ export type ApiProxySessions = {
         rpcId: string;
         payload: unknown;
     }) => Promise<unknown>;
+    history?: (req: {
+        rpcId: string;
+        payload: unknown;
+    }) => Promise<unknown>;
     models?: (req: {
         rpcId: string;
         payload: unknown;

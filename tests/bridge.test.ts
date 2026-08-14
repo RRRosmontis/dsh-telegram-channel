@@ -4,7 +4,7 @@ import type { UserMessage } from '@deepseek-ai/dsh-llm/types'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
 import { TelegramBridge } from '../src/bridge.ts'
 import type { InlineKeyboardMarkup, TelegramClientLike, TelegramUpdate } from '../src/client.ts'
-import { BIND_CB_PREFIX, MSG } from '../src/commands.ts'
+import { BIND_CB_PREFIX, LAST_CB, MSG } from '../src/commands.ts'
 
 type SentMessage = {
   chatId: number
@@ -285,6 +285,7 @@ test('callback bind then plain text followups live agent; mirror assistant to ch
     },
   })
   assert.match(sent.at(-1)!.text, /已附着/)
+  assert.equal(sent.at(-1)!.replyMarkup?.inline_keyboard?.[0]?.[0]?.callback_data, LAST_CB)
 
   await bridge.processUpdate(messageUpdate(10, 1, 'hello from phone', 3))
   assert.equal(followups.length, 1)
@@ -442,6 +443,79 @@ test('/model lists and selects via apiProxy', async () => {
     reasoningEffort: undefined,
   })
   assert.match(sent.at(-1)!.text, /已切换模型/)
+})
+
+test('/last returns previous Q/A via apiProxy history', async () => {
+  const sent: SentMessage[] = []
+  const followups: UserMessage[] = []
+  const agent = makeAgent('live-last', followups, { title: '有历史' })
+  ;(agent as any).session.events = [
+    {
+      type: 'user/message',
+      data: { source: { kind: 'user' }, content: [{ type: 'text', text: '手机续接前的问题' }] },
+    },
+    {
+      type: 'assistant/message',
+      data: { message: { content: [{ type: 'text', text: '电脑上的回答' }] } },
+    },
+  ]
+  const ctx = {
+    logger: { info() {}, warn() {}, error() {} },
+    agents: {
+      list: () => [agent],
+      roots: () => [agent],
+      get: () => agent,
+    },
+    apiProxy: {
+      sessions: {
+        history: async () => ({
+          rpcId: 'h',
+          result: {
+            ok: true,
+            value: {
+              events: [
+                {
+                  event: {
+                    type: 'user/message',
+                    data: { source: { kind: 'user' }, content: [{ type: 'text', text: '手机续接前的问题' }] },
+                  },
+                },
+                {
+                  event: {
+                    type: 'assistant/message',
+                    data: { message: { content: [{ type: 'text', text: '电脑上的回答' }] } },
+                  },
+                },
+              ],
+              hasMore: false,
+            },
+          },
+        }),
+      },
+    },
+    on() { return () => {} },
+  }
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent),
+    sleep: async () => {},
+  })
+  await bridge.processUpdate({
+    update_id: 1,
+    callback_query: {
+      id: 'bind',
+      from: { id: 1 },
+      message: { message_id: 1, date: 0, chat: { id: 10, type: 'private' } },
+      data: `${BIND_CB_PREFIX}live-last`,
+    },
+  })
+  await bridge.processUpdate(messageUpdate(10, 1, '/last', 2))
+  const body = sent.at(-1)!.text
+  assert.match(body, /上次对话|用户/)
+  assert.match(body, /手机续接前的问题/)
+  assert.match(body, /电脑上的回答/)
 })
 
 test('/unbind clears binding without needing create/dispose', async () => {

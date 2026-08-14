@@ -11,6 +11,8 @@ test('parse slash commands for remote control', () => {
   assert.equal(parseCommand('/unbind').type, 'unbind')
   assert.equal(parseCommand('/disconnect').type, 'unbind')
   assert.equal(parseCommand('/model').type, 'model')
+  assert.equal(parseCommand('/last').type, 'last')
+  assert.equal(parseCommand('/context').type, 'last')
   assert.equal(parseCommand('/sessions@MyBot').type, 'sessions')
   assert.equal(parseCommand('/foo').type, 'unknown')
   assert.equal(parseCommand('hello').type, 'plain')
@@ -19,6 +21,7 @@ test('parse slash commands for remote control', () => {
 test('Chinese copy mentions sessions and bind', () => {
   assert.ok(MSG.DENIED.includes('权限') || MSG.DENIED.includes('授权'))
   assert.ok(MSG.HELP.includes('/sessions'))
+  assert.ok(MSG.HELP.includes('/last'))
   assert.ok(MSG.HELP.includes('/model'))
   assert.ok(MSG.NEED_BIND.includes('/sessions'))
   assert.ok(MSG.WELCOME.includes('Web') || MSG.WELCOME.includes('遥控器'))

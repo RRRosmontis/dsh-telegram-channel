@@ -33,6 +33,7 @@ export declare class TelegramBridge {
     private sendWorkspacePicker;
     private sendSessionPicker;
     private bindSession;
+    private sendLastTurn;
     private sendModelPicker;
     private sendEffortPicker;
     private applyModel;

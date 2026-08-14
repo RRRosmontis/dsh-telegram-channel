@@ -15,6 +15,7 @@ export declare const MSG: {
     readonly STATUS_BOUND: (label: string) => string;
     readonly STATUS_BOUND_COLD: (label: string) => string;
     readonly GONE: "绑定的会话已不可用。请重新 /sessions。";
+    readonly LAST_FAILED: "无法读取上次对话。请确认已绑定，且本机 dsh web / apiProxy 可用。";
     readonly MODEL_UNAVAILABLE: (detail?: string) => string;
     readonly MODEL_UNROUTABLE: (current: string) => string;
     readonly MODEL_EMPTY: (current: string) => string;
@@ -30,6 +31,9 @@ export type ParsedCommand = {
     text: string;
 } | {
     type: 'sessions';
+    text: string;
+} | {
+    type: 'last';
     text: string;
 } | {
     type: 'model';
@@ -51,3 +55,5 @@ export type ParsedCommand = {
 export declare function parseCommand(text: string): ParsedCommand;
 /** @deprecated Prefer short index callbacks (ws:/sid:); kept for old messages. */
 export declare const BIND_CB_PREFIX = "bind:";
+/** Inline button: fetch last Q/A for the bound session. */
+export declare const LAST_CB = "last";
