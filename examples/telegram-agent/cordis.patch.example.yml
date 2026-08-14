@@ -1,0 +1,8 @@
+- insert:
+    - id: dsh-telegram-channel
+      name: dsh-telegram-channel
+      config:
+        token: ''
+        allowedUserIds: [123456789]
+        provider: deepseek-official
+        model: deepseek-v4-flash
