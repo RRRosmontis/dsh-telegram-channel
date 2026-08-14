@@ -1,70 +1,64 @@
 # dsh-telegram-channel
 
-[English](#english) · 中文
+[English](#english) · [中文](#中文)
 
-DeepSeek Harness（DSH）的 **Telegram 渠道 Cordis 插件**：长轮询接入 Bot API，按聊天创建独立 agent，将助手回复以 HTML 分片回传。开箱路径是 `dsh plugin add`，目标约 10 分钟内完成安装到首条 agent 回复。
+**Keywords / 关键词：** Telegram · Bot · Mobile · Channel · Remove · Clear · Delete session · DeepSeek Harness · DSH · Cordis · dsh-plugin · Agent · Remote · Long polling · Allowlist · 手机 · 远程 · 机器人 · 渠道 · 会话 · 新对话 · 清除 · 删除 · 白名单 · 长轮询
 
-## 特性
+DeepSeek Harness（DSH）Telegram **Bot / Channel** Cordis 插件：用手机 Telegram 远程驱动本机 Agent。长轮询 Bot API，按聊天独立会话，助手回复 HTML 分片回传。`dsh plugin add` 安装，约 10 分钟连通。
 
-- 标准 Cordis 插件（`inject: ['agents']`），通过 `cordis.patch.yml` 挂入 profile
-- 长轮询 `getUpdates`，无需公网 webhook
-- 按 chat 内存会话映射；`/new` 可重置对话
-- 白名单鉴权（fail-closed）；鉴权与命令文案默认中文
-- Markdown 子集 → Telegram HTML，超长自动分片；HTML 被拒时降级纯文本
+---
+
+## 中文
+
+### 这是什么
+
+把 **Telegram Bot** 接到 **DeepSeek Harness**，让你可以在 **手机（mobile）** 上发消息，本机 DSH agent 执行并回复。适合远程 coding agent、远程运维对话、随身 Bot 入口。
+
+相关搜索词：`telegram bot`、`dsh telegram`、`deepseek harness mobile`、`telegram channel plugin`、`/new` `/clear` `/remove` 会话、白名单 bot。
+
+### 特性
+
+- 标准 Cordis **dsh-plugin**（`inject: ['agents']`），`cordis.patch.yml` 挂入 profile
+- Telegram **长轮询** `getUpdates`，无需公网 webhook
+- 每 chat 一个 agent；`/new`、`/clear` **清除 / 删除**当前会话后重建
+- **白名单**鉴权（fail-closed）；鉴权与命令默认中文
+- Markdown 子集 → Telegram HTML，超长自动分片；HTML 失败降级纯文本
 - 无 token 时软失败：打日志、不启轮询，不拖垮整个 profile
 
-## 前置条件
+### 前置条件
 
 | 项 | 要求 |
 |---|---|
 | Node.js | ≥ 22 |
-| DeepSeek Harness | 已能运行目标 profile（如 `dsh web`），并完成官方要求的 API Key 等配置 |
-| Telegram | 通过 [@BotFather](https://t.me/BotFather) 创建 bot 并取得 token |
-| 用户 ID | 通过 [@userinfobot](https://t.me/userinfobot) 等获取自己的 Telegram numeric user id |
+| DeepSeek Harness | 目标 profile（如 `dsh web`）可运行，API Key 等已按官方配置 |
+| Telegram Bot | [@BotFather](https://t.me/BotFather) 创建 bot，取得 token |
+| 用户 ID | [@userinfobot](https://t.me/userinfobot) 等获取 numeric user id |
 
-## 快速开始（≤10 分钟）
+### 连接实操（约 10 分钟）
 
-1. 确认本机 `dsh web`（或你的目标 profile）可正常启动。
-2. 取得 bot token 与自己的 user id。
-3. 安装本插件（见下方「安装」）。
-4. 设置 `DSH_TELEGRAM_TOKEN`，并在插件配置中填写 `allowedUserIds`（推荐 env 存 token，避免误提交）。
-5. 重新加载或启动 profile。
-6. 在 Telegram 向 bot 发送 `/start`，再发一条普通消息，应收到 agent 回复；发送 `/new` 应提示已开启新会话。
+按下面顺序做即可完成 **Telegram Bot ↔ DSH** 连通：
 
-## 安装
-
-### 从 GitHub（发布后）
+1. 本机确认 `dsh web`（或你的 profile）能正常启动。
+2. BotFather 创建 bot，复制 **token**；userinfobot 记下自己的 **user id**。
+3. 安装插件（推荐 GitHub）：
 
 ```powershell
-dsh plugin --profile web add github:<owner>/dsh-telegram-channel
+dsh plugin --profile web add github:hi-wenw/dsh-telegram-channel
 ```
 
-将 `<owner>` 替换为实际 GitHub 用户名或组织名。
-
-### 从本地目录（开发 / 未发布）
+本地开发目录安装：
 
 ```powershell
-dsh plugin --profile web add D:\path\to\dsh-telegram-channel
+dsh plugin --profile web add D:\gitData\dsh-telegram-channel
 ```
 
-`dsh plugin add` 会读取包内 `cordis.patch.yml` 并合并进 profile。也可参考 [`examples/telegram-agent/`](examples/telegram-agent/) 中的示例 patch。
+4. 设置 token（推荐环境变量，避免写进仓库）：
 
-## 环境变量与配置
+```powershell
+$env:DSH_TELEGRAM_TOKEN = '123456:ABC...'
+```
 
-**推荐**：token 走环境变量，白名单写在 patch / 插件配置中。
-
-| 键 | 默认 | 含义 |
-|---|---|---|
-| `token` | `''`（空则读 `DSH_TELEGRAM_TOKEN`） | BotFather 下发的 bot token |
-| `allowedUserIds` | `[]` | 允许对话的 Telegram user id；**空列表且 `allowAllUsers: false` 时拒绝所有人** |
-| `allowAllUsers` | `false` | 为 `true` 时忽略白名单（仅调试；生产环境勿开） |
-| `provider` | `deepseek-official` | 创建 agent 时的 LLM provider |
-| `model` | `deepseek-v4-flash` | 创建 agent 时的模型 id |
-| `maxMessageLength` | `4096` | 单条 Telegram 消息长度上限 |
-| `pollingTimeoutSec` | `30` | `getUpdates` 长轮询超时（秒） |
-| `cwd` | 未设置时用进程 `cwd` | 传给 agent 的工作目录 |
-
-示例 patch 片段：
+5. 在 profile 的 patch / 插件配置里设置白名单（把数字换成你的 id）：
 
 ```yaml
 - insert:
@@ -77,85 +71,86 @@ dsh plugin --profile web add D:\path\to\dsh-telegram-channel
         model: deepseek-v4-flash
 ```
 
-设置 token（PowerShell）：
+也可参考 [`examples/telegram-agent/`](examples/telegram-agent/)。
 
-```powershell
-$env:DSH_TELEGRAM_TOKEN = '123456:ABC...'
-```
+6. **重新加载或重启** profile，使配置生效。
+7. 手机打开 Telegram，向该 **Bot** 发送：
+   - `/start` — 欢迎
+   - 任意一句话 — 应收到 agent 回复
+   - `/new` 或 `/clear` — **清除会话**后重新对话
+   - `/help` — 命令说明
 
-修改配置后需**重新加载或重启** profile 才会生效。
+### 配置项
 
-## 命令
+| 键 | 默认 | 含义 |
+|---|---|---|
+| `token` | `''`（空则读 `DSH_TELEGRAM_TOKEN`） | BotFather bot token |
+| `allowedUserIds` | `[]` | 允许对话的 Telegram user id；**空且 `allowAllUsers: false` = 全拒** |
+| `allowAllUsers` | `false` | `true` 时忽略白名单（仅本地调试） |
+| `provider` | `deepseek-official` | agent 的 LLM provider |
+| `model` | `deepseek-v4-flash` | 模型 id |
+| `maxMessageLength` | `4096` | 单条消息长度上限 |
+| `pollingTimeoutSec` | `30` | 长轮询超时（秒） |
+| `cwd` | 进程 cwd | agent 工作目录 |
+
+### Bot 命令
 
 | 命令 | 行为 |
 |---|---|
-| `/start` | 欢迎与简短用法；不调用模型 |
-| `/help` | 命令列表与白名单 / 会话说明 |
-| `/new` 或 `/clear` | 释放该 chat 的 agent，下次普通消息重建会话 |
-| 未识别的 `/...` | 提示可用命令 |
+| `/start` | 欢迎与用法；不调模型 |
+| `/help` | 命令与白名单 / 会话说明 |
+| `/new` 或 `/clear` | **清除 / 删除**当前 chat 的 agent，下次消息重建（等同 reset / remove session） |
+| 未识别 `/...` | 提示可用命令 |
 | 普通文本 | `create` / `followup` → 回传助手文本 |
 
-## 故障排查
+### 故障排查
 
 | 现象 | 可能原因 | 处理 |
 |---|---|---|
-| 日志出现 `missing bot token`；bot 无响应 | 未设置 `config.token` 且未设置 `DSH_TELEGRAM_TOKEN` | 设置 env 或 patch 中的 token，然后重载 profile |
-| 收到「无权限。」 | user id 不在 `allowedUserIds`，或白名单为空 | 用 @userinfobot 核对 id，写入 `allowedUserIds` |
-| Telegram 401 / token 无效 | token 错误或已撤销 | 在 BotFather 重新生成 token 并更新 env |
-| 有 typing 但无文字回复 | profile 内 LLM / agent 配置或 API Key 问题 | 查看 DSH 日志；先在同一 profile 用 CLI 验证 agent |
-| 重启 Harness 后对话「失忆」 | MVP 会话仅内存，设计如此 | 直接发消息或 `/new` 重建；跨重启持久化见 Phase 2 |
-| `npm install` 报 peer 冲突 | 上游 DSH RC 包 `dsh-invariants` 版本未对齐 | 贡献者使用 `npm install --legacy-peer-deps`（见下文） |
+| 日志 `missing bot token`；Bot 无响应 | 未设 `token` / `DSH_TELEGRAM_TOKEN` | 设置后重载 profile |
+| 回复「无权限。」 | user id 不在白名单，或名单为空 | 核对 id，写入 `allowedUserIds` |
+| Telegram 401 | token 错误或已撤销 | BotFather 换新 token |
+| 有 typing 无文字 | profile 内 LLM / API Key | 查 DSH 日志；同 profile 先用 CLI 验证 agent |
+| 重启后对话「失忆」 | 会话仅内存（当前设计） | 直接发消息或 `/new` 重建 |
+| 贡献者 `npm install` peer 冲突 | 上游 DSH RC `dsh-invariants` 未对齐 | `npm install --legacy-peer-deps` |
 
-## Phase 2 路线图（不进 MVP）
+### 路线图
 
 1. 运维键盘：新对话 / 状态 / 停止 / 更多
-2. 进度体验：同消息编辑流式、阶段摘要
-3. 会话持久化：chat↔session 跨重启
-4. cwd / 项目切换：对接 harness workspace 策略
+2. 同消息编辑流式、阶段摘要
+3. chat↔session 跨重启持久化
+4. cwd / 项目切换
 5. Telegram 侧切换 provider / model
-6. 媒体：图片接入视觉类工具（若 profile 具备）
-7. 可选 webhook（需公网 HTTPS）
+6. 媒体（图片等，依赖 profile 能力）
+7. 可选 webhook
 
-## 安全说明
+### 安全
 
-- **Fail-closed 白名单**：`allowedUserIds` 为空且 `allowAllUsers: false` 时，所有人被拒绝。
-- **Token 优先走环境变量**，避免写入版本库；日志中对 token 做脱敏。
-- **`allowAllUsers: true` 仅用于本地调试**，不要在生产 profile 开启。
-- 本插件不自行启动 LLM；模型、工具与沙箱由所在 DSH profile 决定。
+- Fail-closed 白名单；空名单默认全拒
+- Token 优先环境变量；日志脱敏
+- `allowAllUsers: true` 勿用于生产
+- 本插件不启 LLM；模型 / 工具 / 沙箱由 DSH profile 决定
 
-## 贡献者：开发与测试
+### 贡献者
 
 ```powershell
-git clone <repo-url> D:\gitData\dsh-telegram-channel
-cd D:\gitData\dsh-telegram-channel
+git clone https://github.com/hi-wenw/dsh-telegram-channel.git
+cd dsh-telegram-channel
 npm install --legacy-peer-deps
 npm test
 npm run build
 ```
 
-> **说明**：当前 DSH RC 系列包的 `@deepseek-ai/dsh-invariants` peer 版本尚未完全对齐，直接 `npm install` 可能 `ERESOLVE`。使用 `--legacy-peer-deps` 可正常安装 devDependencies 并完成构建与单测；运行时由宿主 profile 提供 peer 包。
-
-### 手工冒烟（需真实 bot）
-
-在单元测试与构建通过后，可用以下步骤验收（本仓库发布前未在此环境执行 live Telegram 冒烟）：
-
-1. `npm run build`
-2. `dsh plugin --profile web add <本仓库路径>`
-3. 设置 `DSH_TELEGRAM_TOKEN` 与 `allowedUserIds`
-4. 启动 / 重载 profile
-5. Telegram：`/start` → 发消息 → 收到回复；`/new` 仍可用
-
-## Last verified（最后验证）
+### 验证状态
 
 | 项 | 值 |
 |---|---|
 | 包版本 | `0.1.0` |
-| 验证日期 | 2026-08-14 |
-| 验证方式 | `npm test`（25/25 通过）+ `npm run build` |
-| DSH peer（package.json） | `@deepseek-ai/cordis` ^4.0.1 · `@deepseek-ai/dsh-agent` ^0.1.0-rc.6 · `@deepseek-ai/dsh-llm` ^0.0.1-rc.1 · `@deepseek-ai/dsh-session` ^0.0.1-rc.1 |
-| Live Telegram 冒烟 | 未执行（见上方操作清单） |
+| 日期 | 2026-08-14 |
+| 自动化 | `npm test` 25/25 · `npm run build` |
+| Peer | `@deepseek-ai/cordis` ^4.0.1 · `dsh-agent` ^0.1.0-rc.6 · `dsh-llm` ^0.0.1-rc.1 · `dsh-session` ^0.0.1-rc.1 |
 
-## 许可证
+### 许可证
 
 [MIT](LICENSE)
 
@@ -163,30 +158,144 @@ npm run build
 
 ## English
 
-**dsh-telegram-channel** is a Cordis plugin for [DeepSeek Harness](https://github.com/deepseek-ai) that bridges Telegram (long polling) to `ctx.agents`: per-chat sessions, Chinese auth/command copy, HTML message splitting.
+### What this is
 
-Install:
+A **DeepSeek Harness (DSH) Cordis channel plugin** that turns a **Telegram Bot** into a **mobile / remote** front-end for your local agent. Long-polling Bot API, one agent session per chat, HTML-split replies. Install with `dsh plugin add`; connect in about 10 minutes.
+
+**Search keywords:** telegram bot, telegram channel, mobile agent, remote bot, deepseek harness, dsh-plugin, cordis plugin, remove session, clear chat, `/new`, `/clear`, allowlist, long polling.
+
+### Features
+
+- Standard **dsh-plugin** (`inject: ['agents']`) via `cordis.patch.yml`
+- Telegram **long polling** (`getUpdates`) — no public webhook required
+- Per-chat agent; `/new` and `/clear` **remove / reset / delete** the session
+- Fail-closed **allowlist**; Chinese copy for auth/commands by default
+- Markdown subset → Telegram HTML with chunking; plain-text fallback
+- Missing token soft-fail: log and skip polling (does not crash the profile)
+
+### Prerequisites
+
+| Item | Requirement |
+|---|---|
+| Node.js | ≥ 22 |
+| DeepSeek Harness | Target profile (e.g. `dsh web`) runs with API keys configured |
+| Telegram Bot | Create via [@BotFather](https://t.me/BotFather), copy token |
+| User id | Numeric id from [@userinfobot](https://t.me/userinfobot) (etc.) |
+
+### Connect walkthrough (~10 minutes)
+
+1. Confirm `dsh web` (or your profile) starts on the machine.
+2. Create a **Telegram Bot**, copy **token**; note your **user id**.
+3. Install the plugin:
 
 ```powershell
-dsh plugin --profile web add github:<owner>/dsh-telegram-channel
-# or local: dsh plugin --profile web add D:\path\to\dsh-telegram-channel
+dsh plugin --profile web add github:hi-wenw/dsh-telegram-channel
 ```
 
-Set `DSH_TELEGRAM_TOKEN` and `allowedUserIds` in plugin config. Empty allowlist rejects everyone (fail-closed). Missing token: logs error, does not start polling (soft-fail).
-
-Contributors: `npm install --legacy-peer-deps` due to upstream DSH peer alignment.
-
-**Last verified:** package `0.1.0`, 2026-08-14 — unit tests + build pass; live bot smoke not run in CI.
-
-License: MIT.
-
-### Optional: publish to GitHub
-
-仅在需要公开发布时执行：
+Local path:
 
 ```powershell
-gh repo create dsh-telegram-channel --public --source=D:\gitData\dsh-telegram-channel --remote=origin --push
-gh repo edit --add-topic dsh-plugin
-git tag v0.1.0
-git push origin v0.1.0
+dsh plugin --profile web add D:\gitData\dsh-telegram-channel
 ```
+
+4. Set the token (prefer env):
+
+```powershell
+$env:DSH_TELEGRAM_TOKEN = '123456:ABC...'
+```
+
+5. Allowlist your user id in the profile patch:
+
+```yaml
+- insert:
+    - id: dsh-telegram-channel
+      name: dsh-telegram-channel
+      config:
+        token: ''
+        allowedUserIds: [123456789]
+        provider: deepseek-official
+        model: deepseek-v4-flash
+```
+
+See also [`examples/telegram-agent/`](examples/telegram-agent/).
+
+6. **Reload or restart** the profile.
+7. On your **phone**, open Telegram and message the **Bot**:
+   - `/start` — welcome
+   - any text — agent reply
+   - `/new` or `/clear` — **remove / clear** session, then chat again
+   - `/help` — commands
+
+### Configuration
+
+| Key | Default | Meaning |
+|---|---|---|
+| `token` | `''` (falls back to `DSH_TELEGRAM_TOKEN`) | BotFather token |
+| `allowedUserIds` | `[]` | Allowed Telegram user ids; **empty + `allowAllUsers: false` rejects all** |
+| `allowAllUsers` | `false` | Ignore allowlist (local debug only) |
+| `provider` | `deepseek-official` | LLM provider for created agents |
+| `model` | `deepseek-v4-flash` | Model id |
+| `maxMessageLength` | `4096` | Max Telegram message length |
+| `pollingTimeoutSec` | `30` | Long-poll timeout (seconds) |
+| `cwd` | process cwd | Agent working directory |
+
+### Bot commands
+
+| Command | Behavior |
+|---|---|
+| `/start` | Welcome; no model call |
+| `/help` | Commands + allowlist / session notes |
+| `/new` or `/clear` | **Remove / clear / reset** this chat’s agent; next message creates a new session |
+| Unknown `/...` | Hint available commands |
+| Plain text | `create` / `followup` → assistant text |
+
+### Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Log `missing bot token`; silent Bot | No `token` / `DSH_TELEGRAM_TOKEN` | Set env or config, reload profile |
+| Reply「无权限。」 / Access denied | User not on allowlist or empty list | Fix `allowedUserIds` |
+| Telegram 401 | Bad/revoked token | New token from BotFather |
+| Typing but no text | LLM / API Key in profile | Check DSH logs; verify agent in same profile |
+| Amnesia after restart | In-memory sessions by design | Send a message or `/new` |
+| Contributor `npm install` peer conflict | Upstream DSH RC pins | `npm install --legacy-peer-deps` |
+
+### Roadmap
+
+1. Ops keyboard (new / status / stop / more)
+2. In-place streaming edits
+3. Persist chat↔session across restarts
+4. cwd / project switch
+5. Switch provider/model from Telegram
+6. Media (images) when profile supports it
+7. Optional webhook
+
+### Security
+
+- Fail-closed allowlist
+- Prefer env for token; logs redact secrets
+- Never enable `allowAllUsers` in production
+- Plugin does not start the LLM; profile owns models/tools/sandbox
+
+### Contributors
+
+```powershell
+git clone https://github.com/hi-wenw/dsh-telegram-channel.git
+cd dsh-telegram-channel
+npm install --legacy-peer-deps
+npm test
+npm run build
+```
+
+### Verification
+
+| Item | Value |
+|---|---|
+| Package | `0.1.0` |
+| Date | 2026-08-14 |
+| Automated | `npm test` 25/25 · `npm run build` |
+| Peers | `@deepseek-ai/cordis` ^4.0.1 · `dsh-agent` ^0.1.0-rc.6 · `dsh-llm` ^0.0.1-rc.1 · `dsh-session` ^0.0.1-rc.1 |
+
+### License
+
+[MIT](LICENSE)

@@ -11,16 +11,16 @@
 
 ### 1. 安装插件
 
+**GitHub（推荐）：**
+
+```powershell
+dsh plugin --profile web add github:hi-wenw/dsh-telegram-channel
+```
+
 **本地开发目录**（将路径换成你的克隆位置）：
 
 ```powershell
 dsh plugin --profile web add D:\gitData\dsh-telegram-channel
-```
-
-**GitHub**（发布后）：
-
-```powershell
-dsh plugin --profile web add github:<owner>/dsh-telegram-channel
 ```
 
 `dsh plugin add` 会自动合并包内 `cordis.patch.yml`。若你更习惯手动编辑 profile patch，可将本目录下的 [`cordis.patch.example.yml`](cordis.patch.example.yml) 内容合并进 profile 的 patch 文件。

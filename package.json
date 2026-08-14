@@ -1,7 +1,32 @@
 {
   "name": "dsh-telegram-channel",
   "version": "0.1.0",
-  "description": "Telegram Bot API channel plugin for DeepSeek Harness (long poll, per-chat agents, HTML split)",
+  "description": "DeepSeek Harness Telegram Bot / mobile remote channel Cordis plugin (dsh-plugin): long poll, per-chat agents, /new /clear remove session, allowlist",
+  "keywords": [
+    "telegram",
+    "bot",
+    "mobile",
+    "channel",
+    "remote",
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "cordis",
+    "agent",
+    "remove",
+    "clear",
+    "allowlist",
+    "long-polling"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hi-wenw/dsh-telegram-channel.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hi-wenw/dsh-telegram-channel/issues"
+  },
+  "homepage": "https://github.com/hi-wenw/dsh-telegram-channel#readme",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
