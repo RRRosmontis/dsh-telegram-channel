@@ -15,4 +15,5 @@ export * from './format.js';
 export * from './client.js';
 export * from './auth.js';
 export * from './commands.js';
+export * from './label.js';
 export * from './bridge.js';

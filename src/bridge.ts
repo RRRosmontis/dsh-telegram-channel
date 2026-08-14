@@ -12,6 +12,7 @@ import {
 } from './client.js'
 import { BIND_CB_PREFIX, MSG, parseCommand } from './commands.js'
 import { markdownToHtml, splitMessage } from './format.js'
+import { buttonLabel, describeAgent, detailLines, displayLabel } from './label.js'
 
 export interface TelegramBridgeOptions {
   token: string
@@ -41,15 +42,6 @@ function contentToText(content: readonly ContentBlock[]): string {
     .filter((block): block is TextBlock => block.type === 'text')
     .map((block) => block.text)
     .join('')
-}
-
-function shortLabel(agent: Agent, index: number): string {
-  const id = String(agent.id)
-  const tail = id.length > 12 ? id.slice(-12) : id
-  const cwd = (agent.session as { meta?: { cwd?: string } } | undefined)?.meta?.cwd
-  const cwdBit = cwd ? cwd.split(/[/\\]/).filter(Boolean).slice(-1)[0] : ''
-  const base = cwdBit ? `${cwdBit} · ${tail}` : `session ${index + 1} · ${tail}`
-  return base.length > 60 ? `${base.slice(0, 57)}...` : base
 }
 
 export class TelegramBridge {
@@ -188,7 +180,7 @@ export class TelegramBridge {
       await this.client.sendMessage(chatId, MSG.GONE)
       return
     }
-    const label = shortLabel(agent, 0)
+    const label = displayLabel(describeAgent(agent, 0, this.ctx))
     this.bindings.set(String(chatId), { chatId, sessionId: String(agent.id), label })
     await this.client.answerCallbackQuery(cq.id, '已附着')
     await this.client.sendMessage(chatId, MSG.BOUND(label))
@@ -223,18 +215,21 @@ export class TelegramBridge {
       await this.client.sendMessage(chatId, MSG.NO_LIVE)
       return
     }
+    const described = agents.map((agent, i) => describeAgent(agent, i, this.ctx))
     const keyboard: InlineKeyboardMarkup = {
-      inline_keyboard: agents.map((agent, i) => {
-        const label = shortLabel(agent, i)
-        return [{ text: label, callback_data: `${BIND_CB_PREFIX}${String(agent.id)}` }]
-      }),
+      inline_keyboard: described.map((parts) => ([{
+        text: buttonLabel(parts),
+        callback_data: `${BIND_CB_PREFIX}${parts.sessionId}`,
+      }])),
     }
-    await this.client.sendMessage(
-      chatId,
+    const body = [
       `选择要遥控的本机会话（共 ${agents.length} 个）：`,
-      undefined,
-      keyboard,
-    )
+      '',
+      ...described.map((parts) => detailLines(parts)),
+      '',
+      '点下方按钮附着对应会话。',
+    ].join('\n')
+    await this.client.sendMessage(chatId, body, undefined, keyboard)
   }
 
   private async sendStatus(chatId: number): Promise<void> {

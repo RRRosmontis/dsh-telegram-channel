@@ -44,10 +44,21 @@ function messageUpdate(chatId: number, userId: number, text: string, updateId = 
   }
 }
 
-function makeAgent(id: string, followups: UserMessage[]) {
+function makeAgent(id: string, followups: UserMessage[], opts?: {
+  cwd?: string
+  title?: string
+}) {
+  const cwd = opts?.cwd ?? `/proj/${id}`
+  const events = opts?.title
+    ? [{ type: 'session/title', data: { title: opts.title } }]
+    : []
   return {
     id: SessionId(id),
-    session: { meta: { cwd: `/proj/${id}` } },
+    session: {
+      header: { cwd },
+      meta: { cwd },
+      events,
+    },
     followup(message: UserMessage) {
       followups.push(message)
     },
@@ -118,7 +129,10 @@ test('/sessions with no live agents shows NO_LIVE', async () => {
 test('/sessions lists live agents with bind callbacks', async () => {
   const sent: SentMessage[] = []
   const followups: UserMessage[] = []
-  const agent = makeAgent('live-aaa', followups)
+  const agent = makeAgent('live-aaa', followups, {
+    cwd: 'D:/gitData/demo-app',
+    title: '演示会话',
+  })
   const ctx = {
     logger: { info() {}, warn() {}, error() {} },
     agents: {
@@ -137,6 +151,9 @@ test('/sessions lists live agents with bind callbacks', async () => {
   })
   await bridge.processUpdate(messageUpdate(10, 1, '/sessions'))
   assert.match(sent[0]!.text, /选择要遥控/)
+  assert.match(sent[0]!.text, /演示会话/)
+  assert.match(sent[0]!.text, /D:\/gitData\/demo-app/)
+  assert.match(sent[0]!.replyMarkup!.inline_keyboard![0]![0]!.text, /演示会话/)
   assert.ok(sent[0]!.replyMarkup?.inline_keyboard?.[0]?.[0]?.callback_data?.startsWith(BIND_CB_PREFIX))
 })
 
