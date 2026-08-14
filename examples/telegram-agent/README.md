@@ -2,27 +2,29 @@
 
 Attach Telegram to **live** DSH Web sessions (same trajectory).
 
-## Install
+## Recommended: one-click
+
+See root [README](../../README.md#一键安装推荐):
 
 ```powershell
-dsh plugin --profile web add github:hi-wenw/dsh-telegram-channel
+irm https://raw.githubusercontent.com/hi-wenw/dsh-telegram-channel/master/scripts/install.ps1 | iex
 ```
 
-Local:
+Or from a clone:
 
 ```powershell
-dsh plugin --profile web add D:\gitData\dsh-telegram-channel
+..\..\scripts\install.ps1 -Token '...' -UserId '123456789'
 ```
 
-## Config
-
-1. Open a conversation in `dsh web` first.
-2. Set token:
+## Manual
 
 ```powershell
 $env:DSH_TELEGRAM_TOKEN = '123456:ABC...'
+$env:DSH_TELEGRAM_ALLOWED_USER_IDS = '123456789'
+dsh plugin --profile web add github:hi-wenw/dsh-telegram-channel
 ```
 
-3. Merge [`cordis.patch.example.yml`](cordis.patch.example.yml) (replace user id).
-4. Reload profile.
-5. Phone: `/sessions` → bind → chat. `/unbind` to disconnect.
+Optional YAML allowlist (id override only — do **not** re-insert):  
+[`cordis.patch.example.yml`](cordis.patch.example.yml)
+
+Then: `dsh web` → open a Web chat → phone `/sessions` → bind. `/unbind` disconnects phone only.
