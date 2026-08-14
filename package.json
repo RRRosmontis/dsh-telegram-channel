@@ -1,7 +1,7 @@
 {
   "name": "dsh-telegram-channel",
-  "version": "0.2.3",
-  "description": "DeepSeek Harness Telegram mobile remote: bind live Web sessions (Codex-style), same trajectory, /sessions picker, unbind/clear — dsh-plugin",
+  "version": "0.3.0",
+  "description": "DeepSeek Harness Telegram mobile remote: workspace→session picker (Web-aligned), /model switch, same trajectory — dsh-plugin",
   "keywords": [
     "telegram",
     "bot",
@@ -9,6 +9,8 @@
     "remote",
     "channel",
     "sessions",
+    "workspace",
+    "model",
     "bind",
     "unbind",
     "remove",

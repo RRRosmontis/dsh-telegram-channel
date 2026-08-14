@@ -30,9 +30,9 @@ Telegram **手机遥控器** for DeepSeek Harness：附着本机正在跑的 Web
 
 ### 30 秒理解
 
-1. 电脑 `dsh web` 开着，并打开一个对话  
-2. 手机 Bot 发 `/sessions`，点选该对话  
-3. 之后手机 ↔ Web 走**同一条**轨迹
+1. 电脑 `dsh web` 开着（会话列表与 Web 对齐，已归档除外）  
+2. 手机 Bot：`/sessions` → **工作区** → **会话** → 附着  
+3. 之后手机 ↔ Web 走**同一条**轨迹；可用 `/model` 切换模型（下一回合生效）
 
 ### 效果截图
 
@@ -115,14 +115,16 @@ curl -fsSL https://raw.githubusercontent.com/hi-wenw/dsh-telegram-channel/master
 ### 手机怎么用
 
 1. 菜单选 **2** 启动 `dsh web`（或自己运行 `dsh web`）  
-2. 浏览器打开一个对话并保持运行  
-3. 手机对 Bot：`/start` → `/sessions` → 点选 → 聊天  
+2. 浏览器里可看到工作区与会话（归档会话不会出现在手机列表）  
+3. 手机对 Bot：`/start` → `/sessions` → 选工作区 → 选会话 → 聊天  
+4. 需要换模型时：`/model` → 点选（与 Web 同 API，下一回合生效）
 
-输入框旁的 **/** 菜单应有：`start` `sessions` `status` `unbind` `help`。
+输入框旁的 **/** 菜单应有：`start` `sessions` `model` `status` `unbind` `help`。
 
 | 命令 | 作用 |
 |---|---|
-| `/sessions` | 列出并附着本机 live 会话 |
+| `/sessions` | 先列工作区，再列该工作区会话（与 Web 对齐，排除归档/空白/子代理）；冷会话附着时会自动 resume |
+| `/model` | 切换当前绑定会话的模型 |
 | `/status` | 当前绑定 |
 | `/unbind` | 只断开手机，**不关**电脑会话 |
 | `/help` | 帮助 |
@@ -184,7 +186,9 @@ dsh plugin --profile web add D:\path\to\dsh-telegram-channel
 | 手机完全没回复 / ConnectTimeout | 打开本地代理（如 7890），重启 `dsh web` |
 | `missing bot token` | 检查环境变量；**新开终端**再 `dsh web` |
 | 「无权限」 | User ID 必须是 `@userinfobot` 的数字 |
-| `/sessions` 无会话 | 先在 Web 打开对话 |
+| `/sessions` 无会话 | 确认 Web 有未归档会话；空白会话会被隐藏 |
+| `/sessions` 比电脑少很多 | 升级到 ≥0.3.0：应按工作区列出；仍少则检查是否归档 |
+| `/model` 不可用 | 需 `dsh web`（apiProxy）；先 `/sessions` 绑定 |
 | Telegram 401 | Token 错了或被 revoke |
 
 ---
@@ -233,11 +237,11 @@ dsh plugin --profile web add github:hi-wenw/dsh-telegram-channel
 
 ### What this is
 
-Telegram **mobile remote** for **live** DeepSeek Harness Web agents. Desktop/Web is the source of truth; the phone **attaches** (no parallel hidden agent).
+Telegram **mobile remote** for DeepSeek Harness Web sessions. Desktop/Web is the source of truth; the phone **attaches** (no parallel hidden agent). `/sessions` is **workspace → session** (Web-aligned, archived excluded). `/model` switches the bound session’s model for the next turn.
 
 ### Screenshots
 
-Phone: pick a live session and chat:
+Phone: pick a session and chat:
 
 ![Telegram mobile remote](docs/screenshots/mobile-chat.jpg)
 
@@ -267,7 +271,7 @@ Direct actions:
 .\scripts\install.ps1 -Action install -Token '...' -UserId '123456789'
 ```
 
-The script sets user env vars, ensures `allowBuilds`, and runs `dsh plugin add`. After **start**, open a Web chat → phone: `/sessions` → bind.
+The script sets user env vars, ensures `allowBuilds`, and runs `dsh plugin add`. After **start**, phone: `/sessions` → workspace → session → bind; optional `/model`.
 
 ### Unix
 

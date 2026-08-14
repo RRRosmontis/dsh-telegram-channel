@@ -27,4 +27,4 @@ dsh plugin --profile web add github:hi-wenw/dsh-telegram-channel
 Optional YAML allowlist (id override only — do **not** re-insert):  
 [`cordis.patch.example.yml`](cordis.patch.example.yml)
 
-Then: `dsh web` → open a Web chat → phone `/sessions` → bind. `/unbind` disconnects phone only.
+Then: `dsh web` → phone `/sessions` → workspace → session → bind. Optional `/model`. `/unbind` disconnects phone only.

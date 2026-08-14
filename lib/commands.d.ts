@@ -3,12 +3,23 @@ export declare const MSG: {
     readonly WELCOME: string;
     readonly HELP: string;
     readonly NEED_BIND: "尚未绑定本机会话。请先发送 /sessions 选择一个。";
-    readonly NO_LIVE: "当前没有正在运行的本机会话。请先在 Web（dsh web）打开或继续一个对话，再发 /sessions。";
+    readonly NO_SESSIONS: "当前没有可附着的本机会话（已排除归档与空白会话）。请先在 Web（dsh web）打开或继续一个对话，再发 /sessions。";
+    readonly NO_SESSIONS_IN_WS: (title: string) => string;
+    /** @deprecated use NO_SESSIONS */
+    readonly NO_LIVE: "当前没有可附着的本机会话。请先在 Web（dsh web）打开或继续一个对话，再发 /sessions。";
+    readonly PICKER_STALE: "列表已过期，请重新发送 /sessions。";
+    readonly RESUME_FAILED: "无法附着该会话（resume 失败）。请确认会话存在于 Web，或先在电脑打开后再试。";
     readonly BOUND: (label: string) => string;
     readonly UNBOUND: "已断开绑定。本机会话仍在运行。";
     readonly STATUS_NONE: "当前未绑定任何本机会话。发送 /sessions 选择。";
     readonly STATUS_BOUND: (label: string) => string;
-    readonly GONE: "绑定的会话已不在本机运行（可能已在 Web 关闭）。请重新 /sessions。";
+    readonly STATUS_BOUND_COLD: (label: string) => string;
+    readonly GONE: "绑定的会话已不可用。请重新 /sessions。";
+    readonly MODEL_UNAVAILABLE: "无法读取模型列表（需要 dsh web / apiProxy）。请确认本机 Harness 已加载 host-apiproxy。";
+    readonly MODEL_UNROUTABLE: (current: string) => string;
+    readonly MODEL_EMPTY: (current: string) => string;
+    readonly MODEL_SET: (selected: string) => string;
+    readonly MODEL_FAILED: "切换模型失败。请稍后重试或在 Web 中切换。";
     readonly unknown: (command: string) => string;
 };
 export type ParsedCommand = {
@@ -19,6 +30,9 @@ export type ParsedCommand = {
     text: string;
 } | {
     type: 'sessions';
+    text: string;
+} | {
+    type: 'model';
     text: string;
 } | {
     type: 'status';
@@ -35,5 +49,5 @@ export type ParsedCommand = {
     text: string;
 };
 export declare function parseCommand(text: string): ParsedCommand;
-/** Callback data prefix for session bind buttons. */
+/** @deprecated Prefer short index callbacks (ws:/sid:); kept for old messages. */
 export declare const BIND_CB_PREFIX = "bind:";

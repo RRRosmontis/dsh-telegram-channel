@@ -18,6 +18,7 @@ export declare class TelegramBridge {
     private readonly sleep;
     private readonly maxMessageLength;
     private readonly bindings;
+    private readonly pickers;
     private polling;
     private offset;
     private pollPromise;
@@ -28,9 +29,17 @@ export declare class TelegramBridge {
     stop(): Promise<void>;
     processUpdate(update: TelegramUpdate): Promise<void>;
     private handleCallback;
+    private resolveCatalog;
+    private sendWorkspacePicker;
+    private sendSessionPicker;
+    private bindSession;
+    private sendModelPicker;
+    private sendEffortPicker;
+    private applyModel;
     private liveAgents;
     private findLiveAgent;
-    private sendSessionPicker;
+    /** Resume cold sessions when needed; never dispose the returned handle. */
+    private ensureLiveAgent;
     private sendStatus;
     private followupBound;
     private pollLoop;

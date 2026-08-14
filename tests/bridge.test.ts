@@ -65,6 +65,10 @@ function makeAgent(id: string, followups: UserMessage[], opts?: {
   }
 }
 
+function rpcOk<T>(value: T) {
+  return { rpcId: 'x', result: { ok: true as const, value } }
+}
+
 test('unauthorized user gets denied', async () => {
   const sent: SentMessage[] = []
   const ctx = {
@@ -108,7 +112,7 @@ test('plain text without bind prompts NEED_BIND and does not create', async () =
   assert.equal(sent[0]?.text, MSG.NEED_BIND)
 })
 
-test('/sessions with no live agents shows NO_LIVE', async () => {
+test('/sessions with no sessions shows NO_SESSIONS', async () => {
   const sent: SentMessage[] = []
   const ctx = {
     logger: { info() {}, warn() {}, error() {} },
@@ -123,10 +127,10 @@ test('/sessions with no live agents shows NO_LIVE', async () => {
     sleep: async () => {},
   })
   await bridge.processUpdate(messageUpdate(10, 1, '/sessions'))
-  assert.equal(sent[0]?.text, MSG.NO_LIVE)
+  assert.equal(sent[0]?.text, MSG.NO_SESSIONS)
 })
 
-test('/sessions lists live agents with bind callbacks', async () => {
+test('/sessions lists workspaces then sessions via callbacks', async () => {
   const sent: SentMessage[] = []
   const followups: UserMessage[] = []
   const agent = makeAgent('live-aaa', followups, {
@@ -150,11 +154,94 @@ test('/sessions lists live agents with bind callbacks', async () => {
     sleep: async () => {},
   })
   await bridge.processUpdate(messageUpdate(10, 1, '/sessions'))
-  assert.match(sent[0]!.text, /选择要遥控/)
-  assert.match(sent[0]!.text, /演示会话/)
-  assert.match(sent[0]!.text, /D:\/gitData\/demo-app/)
-  assert.match(sent[0]!.replyMarkup!.inline_keyboard![0]![0]!.text, /演示会话/)
-  assert.ok(sent[0]!.replyMarkup?.inline_keyboard?.[0]?.[0]?.callback_data?.startsWith(BIND_CB_PREFIX))
+  assert.match(sent[0]!.text, /选择工作区/)
+  assert.match(sent[0]!.text, /demo-app/)
+  assert.equal(sent[0]!.replyMarkup?.inline_keyboard?.[0]?.[0]?.callback_data, 'ws:0')
+
+  await bridge.processUpdate({
+    update_id: 2,
+    callback_query: {
+      id: 'cq-ws',
+      from: { id: 1 },
+      message: { message_id: 1, date: 0, chat: { id: 10, type: 'private' } },
+      data: 'ws:0',
+    },
+  })
+  const sessionMsg = sent.at(-1)!
+  assert.match(sessionMsg.text, /选择会话/)
+  assert.match(sessionMsg.text, /演示会话/)
+  assert.equal(sessionMsg.replyMarkup?.inline_keyboard?.[0]?.[0]?.callback_data, 'sid:0')
+})
+
+test('/sessions via apiProxy shows all workspaces excluding archived', async () => {
+  const sent: SentMessage[] = []
+  const ctx = {
+    logger: { info() {}, warn() {}, error() {} },
+    agents: { list: () => [], roots: () => [], get: () => undefined },
+    apiProxy: {
+      workspace: {
+        list: async () => rpcOk({
+          items: [
+            {
+              workspaceId: 'w1',
+              path: 'D:/a',
+              title: 'Alpha',
+              sessionIds: ['s1', 's-archived'],
+            },
+            {
+              workspaceId: 'w2',
+              path: 'D:/b',
+              title: 'Beta',
+              sessionIds: ['s2'],
+            },
+          ],
+          archivedSessionIds: ['s-archived'],
+        }),
+      },
+      sessions: {
+        list: async () => rpcOk({
+          items: [
+            {
+              sessionId: 's1',
+              updatedAt: 2,
+              running: true,
+              blank: false,
+              cwd: 'D:/a',
+              projections: { values: { title: '会话一' } },
+            },
+            {
+              sessionId: 's-archived',
+              updatedAt: 1,
+              running: false,
+              blank: false,
+              cwd: 'D:/a',
+              projections: { values: { title: '已归档' } },
+            },
+            {
+              sessionId: 's2',
+              updatedAt: 3,
+              running: false,
+              blank: false,
+              cwd: 'D:/b',
+              projections: { values: { title: '会话二' } },
+            },
+          ],
+        }),
+      },
+    },
+    on() { return () => {} },
+  }
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent),
+    sleep: async () => {},
+  })
+  await bridge.processUpdate(messageUpdate(10, 1, '/sessions'))
+  assert.match(sent[0]!.text, /Alpha/)
+  assert.match(sent[0]!.text, /Beta/)
+  assert.equal(sent[0]!.replyMarkup?.inline_keyboard?.length, 2)
 })
 
 test('callback bind then plain text followups live agent; mirror assistant to chat', async () => {
@@ -213,6 +300,148 @@ test('callback bind then plain text followups live agent; mirror assistant to ch
   assert.ok(sent.some((m) => m.text.includes('reply from agent') || m.text.includes('reply')))
 
   await bridge.stop()
+})
+
+test('cold session bind resumes then followups', async () => {
+  const sent: SentMessage[] = []
+  const followups: UserMessage[] = []
+  const agent = makeAgent('cold-1', followups, { cwd: 'D:/proj', title: '冷会话' })
+  let resumed = false
+  const ctx = {
+    logger: { info() {}, warn() {}, error() {} },
+    agents: {
+      list: () => [],
+      roots: () => [],
+      get: () => (resumed ? agent : undefined),
+      resume: async () => {
+        resumed = true
+        return { agent, dispose: async () => {} }
+      },
+    },
+    apiProxy: {
+      workspace: {
+        list: async () => rpcOk({
+          items: [{ workspaceId: 'w', path: 'D:/proj', title: 'proj', sessionIds: ['cold-1'] }],
+          archivedSessionIds: [],
+        }),
+      },
+      sessions: {
+        list: async () => rpcOk({
+          items: [{
+            sessionId: 'cold-1',
+            updatedAt: 1,
+            running: false,
+            blank: false,
+            cwd: 'D:/proj',
+            projections: { values: { title: '冷会话' } },
+          }],
+        }),
+      },
+    },
+    on() { return () => {} },
+  }
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent),
+    sleep: async () => {},
+  })
+  await bridge.processUpdate(messageUpdate(10, 1, '/sessions'))
+  await bridge.processUpdate({
+    update_id: 2,
+    callback_query: {
+      id: 'cq-ws',
+      from: { id: 1 },
+      message: { message_id: 1, date: 0, chat: { id: 10, type: 'private' } },
+      data: 'ws:0',
+    },
+  })
+  await bridge.processUpdate({
+    update_id: 3,
+    callback_query: {
+      id: 'cq-sid',
+      from: { id: 1 },
+      message: { message_id: 2, date: 0, chat: { id: 10, type: 'private' } },
+      data: 'sid:0',
+    },
+  })
+  assert.equal(resumed, true)
+  assert.match(sent.at(-1)!.text, /已附着/)
+  await bridge.processUpdate(messageUpdate(10, 1, 'hi cold', 4))
+  assert.equal(followups.length, 1)
+})
+
+test('/model lists and selects via apiProxy', async () => {
+  const sent: SentMessage[] = []
+  const followups: UserMessage[] = []
+  const agent = makeAgent('live-mdl', followups)
+  let selected: unknown
+  const ctx = {
+    logger: { info() {}, warn() {}, error() {} },
+    agents: {
+      list: () => [agent],
+      roots: () => [agent],
+      get: () => agent,
+    },
+    apiProxy: {
+      sessions: {
+        models: async () => rpcOk({
+          current: { provider: 'deepseek', model: 'chat' },
+          routable: true,
+          groups: [{
+            id: 'deepseek',
+            name: 'DeepSeek',
+            models: [
+              { id: 'chat', name: 'Chat' },
+              { id: 'reasoner', name: 'Reasoner', reasoning: { efforts: [{ id: 'high', name: 'High' }] } },
+            ],
+          }],
+        }),
+        selectModel: async (req: { payload: unknown }) => {
+          selected = req.payload
+          return rpcOk({ selected: { provider: 'deepseek', model: 'chat' } })
+        },
+      },
+    },
+    on() { return () => {} },
+  }
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent),
+    sleep: async () => {},
+  })
+  await bridge.processUpdate({
+    update_id: 1,
+    callback_query: {
+      id: 'bind',
+      from: { id: 1 },
+      message: { message_id: 1, date: 0, chat: { id: 10, type: 'private' } },
+      data: `${BIND_CB_PREFIX}live-mdl`,
+    },
+  })
+  await bridge.processUpdate(messageUpdate(10, 1, '/model', 2))
+  assert.match(sent.at(-1)!.text, /当前模型/)
+  assert.equal(sent.at(-1)!.replyMarkup?.inline_keyboard?.[0]?.[0]?.callback_data, 'mdl:0')
+
+  await bridge.processUpdate({
+    update_id: 3,
+    callback_query: {
+      id: 'pick',
+      from: { id: 1 },
+      message: { message_id: 2, date: 0, chat: { id: 10, type: 'private' } },
+      data: 'mdl:0',
+    },
+  })
+  assert.deepEqual(selected, {
+    sessionId: 'live-mdl',
+    provider: 'deepseek',
+    model: 'chat',
+    reasoningEffort: undefined,
+  })
+  assert.match(sent.at(-1)!.text, /已切换模型/)
 })
 
 test('/unbind clears binding without needing create/dispose', async () => {

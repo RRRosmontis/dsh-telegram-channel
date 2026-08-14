@@ -5,14 +5,30 @@ import type { ContentBlock, TextBlock } from '@deepseek-ai/dsh-llm/types'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session/types'
 import { isAuthorized } from './auth.js'
 import {
+  catalogFromLiveAgents,
+  loadCatalog,
+  truncateButton,
+  visibleSessionsForWorkspace,
+  workspacesWithVisibleSessions,
+  type CatalogSnapshot,
+  type SessionRow,
+  type WorkspaceRow,
+} from './catalog.js'
+import {
   TelegramClient,
   type InlineKeyboardMarkup,
   type TelegramClientLike,
   type TelegramUpdate,
 } from './client.js'
-import { BIND_CB_PREFIX, MSG, parseCommand } from './commands.js'
+import { MSG, parseCommand } from './commands.js'
 import { markdownToHtml, splitMessage } from './format.js'
-import { buttonLabel, describeAgent, detailLines, displayLabel } from './label.js'
+import { describeAgent, displayLabel } from './label.js'
+import {
+  formatModel,
+  loadSessionModels,
+  selectSessionModel,
+  type ModelOption,
+} from './models.js'
 
 export interface TelegramBridgeOptions {
   token: string
@@ -31,9 +47,25 @@ interface Binding {
   label: string
 }
 
+interface PickerState {
+  workspaces: WorkspaceRow[]
+  sessions: SessionRow[]
+  catalog?: CatalogSnapshot
+  models?: ModelOption[]
+  pendingModel?: ModelOption
+}
+
 interface SessionLike {
   id: ReturnType<typeof SessionId>
 }
+
+const WS_CB = 'ws:'
+const SID_CB = 'sid:'
+const BACK_WS_CB = 'wb'
+const MODEL_CB = 'mdl:'
+const EFFORT_CB = 'me:'
+const BACK_MODEL_CB = 'mb'
+const MAX_BUTTONS = 40
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
@@ -54,6 +86,7 @@ export class TelegramBridge {
   private readonly maxMessageLength: number
 
   private readonly bindings = new Map<string, Binding>()
+  private readonly pickers = new Map<string, PickerState>()
   private polling = false
   private offset: number | undefined
   private pollPromise: Promise<void> | undefined
@@ -81,7 +114,8 @@ export class TelegramBridge {
     })
     void this.client.setMyCommands([
       { command: 'start', description: '欢迎与用法' },
-      { command: 'sessions', description: '列出并附着本机 live 会话' },
+      { command: 'sessions', description: '按工作区列出并附着会话' },
+      { command: 'model', description: '切换当前绑定会话的模型' },
       { command: 'status', description: '查看当前绑定' },
       { command: 'unbind', description: '断开手机绑定（不关闭本机会话）' },
       { command: 'help', description: '显示帮助' },
@@ -106,6 +140,7 @@ export class TelegramBridge {
     this.disposeSessionListener = undefined
     // Never dispose host agents — only clear remote bindings.
     this.bindings.clear()
+    this.pickers.clear()
     if (this.pollPromise) {
       await this.pollPromise.catch(() => {})
       this.pollPromise = undefined
@@ -137,13 +172,17 @@ export class TelegramBridge {
         await this.client.sendMessage(chatId, MSG.HELP)
         return
       case 'sessions':
-        await this.sendSessionPicker(chatId)
+        await this.sendWorkspacePicker(chatId)
+        return
+      case 'model':
+        await this.sendModelPicker(chatId)
         return
       case 'status':
         await this.sendStatus(chatId)
         return
       case 'unbind':
         this.bindings.delete(String(chatId))
+        this.pickers.delete(String(chatId))
         await this.client.sendMessage(chatId, MSG.UNBOUND)
         return
       case 'unknown':
@@ -169,21 +208,278 @@ export class TelegramBridge {
       return
     }
     const data = cq.data ?? ''
-    if (!data.startsWith(BIND_CB_PREFIX)) {
+    const picker = this.pickers.get(String(chatId))
+
+    if (data === BACK_WS_CB) {
       await this.client.answerCallbackQuery(cq.id)
+      await this.sendWorkspacePicker(chatId, picker?.catalog)
       return
     }
-    const sessionId = data.slice(BIND_CB_PREFIX.length)
-    const agent = this.findLiveAgent(sessionId)
+    if (data === BACK_MODEL_CB) {
+      await this.client.answerCallbackQuery(cq.id)
+      await this.sendModelPicker(chatId)
+      return
+    }
+    if (data.startsWith(WS_CB)) {
+      const index = Number(data.slice(WS_CB.length))
+      await this.client.answerCallbackQuery(cq.id)
+      await this.sendSessionPicker(chatId, index)
+      return
+    }
+    if (data.startsWith(SID_CB)) {
+      const index = Number(data.slice(SID_CB.length))
+      const row = picker?.sessions[index]
+      if (!row) {
+        await this.client.answerCallbackQuery(cq.id, '会话已过期')
+        await this.client.sendMessage(chatId, MSG.PICKER_STALE)
+        return
+      }
+      await this.bindSession(chatId, cq.id, row)
+      return
+    }
+    if (data.startsWith(MODEL_CB)) {
+      const index = Number(data.slice(MODEL_CB.length))
+      const option = picker?.models?.[index]
+      if (!option) {
+        await this.client.answerCallbackQuery(cq.id, '列表已过期')
+        await this.client.sendMessage(chatId, MSG.PICKER_STALE)
+        return
+      }
+      if (option.efforts && option.efforts.length > 0) {
+        if (picker) picker.pendingModel = option
+        await this.client.answerCallbackQuery(cq.id)
+        await this.sendEffortPicker(chatId, option)
+        return
+      }
+      await this.applyModel(chatId, cq.id, option)
+      return
+    }
+    if (data.startsWith(EFFORT_CB)) {
+      const index = Number(data.slice(EFFORT_CB.length))
+      const pending = picker?.pendingModel
+      const effort = pending?.efforts?.[index]
+      if (!pending || !effort) {
+        await this.client.answerCallbackQuery(cq.id, '列表已过期')
+        await this.client.sendMessage(chatId, MSG.PICKER_STALE)
+        return
+      }
+      await this.applyModel(chatId, cq.id, pending, effort.id)
+      return
+    }
+
+    // Legacy bind:<sessionId> callbacks (older messages / tests)
+    if (data.startsWith('bind:')) {
+      const sessionId = data.slice('bind:'.length)
+      await this.bindSession(chatId, cq.id, {
+        sessionId,
+        title: sessionId,
+        blank: false,
+        running: true,
+        updatedAt: 0,
+      })
+      return
+    }
+
+    await this.client.answerCallbackQuery(cq.id)
+  }
+
+  private async resolveCatalog(): Promise<CatalogSnapshot> {
+    try {
+      const fromApi = await loadCatalog(this.ctx)
+      if (fromApi) return fromApi
+    } catch (err) {
+      this.ctx.logger.warn(`dsh-telegram-channel: catalog via apiProxy failed: ${this.redact(err)}`)
+    }
+    return catalogFromLiveAgents(this.liveAgents(), this.ctx)
+  }
+
+  private async sendWorkspacePicker(chatId: number, existing?: CatalogSnapshot): Promise<void> {
+    const catalog = existing ?? await this.resolveCatalog()
+    const workspaces = workspacesWithVisibleSessions(catalog)
+    if (workspaces.length === 0) {
+      this.pickers.delete(String(chatId))
+      await this.client.sendMessage(chatId, MSG.NO_SESSIONS)
+      return
+    }
+    const shown = workspaces.slice(0, MAX_BUTTONS)
+    this.pickers.set(String(chatId), { workspaces: shown, sessions: [], catalog })
+    const keyboard: InlineKeyboardMarkup = {
+      inline_keyboard: shown.map((ws, i) => ([{
+        text: truncateButton(`${i + 1}. ${ws.title}`),
+        callback_data: `${WS_CB}${i}`,
+      }])),
+    }
+    const body = [
+      `选择工作区（共 ${workspaces.length} 个，与 Web 对齐，已排除归档）：`,
+      '',
+      ...shown.map((ws, i) => {
+        const n = visibleSessionsForWorkspace(catalog, ws).length
+        return `${i + 1}. ${ws.title}\n   ${ws.path}\n   会话：${n}`
+      }),
+      workspaces.length > MAX_BUTTONS ? `\n仅显示前 ${MAX_BUTTONS} 个工作区。` : '',
+      '',
+      '点下方按钮进入该工作区的会话列表。',
+    ].filter(Boolean).join('\n')
+    await this.client.sendMessage(chatId, body, undefined, keyboard)
+  }
+
+  private async sendSessionPicker(chatId: number, workspaceIndex: number): Promise<void> {
+    const picker = this.pickers.get(String(chatId))
+    const catalog = picker?.catalog ?? await this.resolveCatalog()
+    const workspaces = picker?.workspaces?.length
+      ? picker.workspaces
+      : workspacesWithVisibleSessions(catalog)
+    const workspace = workspaces[workspaceIndex]
+    if (!workspace) {
+      await this.client.sendMessage(chatId, MSG.PICKER_STALE)
+      return
+    }
+    const sessions = visibleSessionsForWorkspace(catalog, workspace)
+      .slice()
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+    if (sessions.length === 0) {
+      await this.client.sendMessage(chatId, MSG.NO_SESSIONS_IN_WS(workspace.title))
+      return
+    }
+    const shown = sessions.slice(0, MAX_BUTTONS)
+    this.pickers.set(String(chatId), { workspaces, sessions: shown, catalog })
+    const keyboard: InlineKeyboardMarkup = {
+      inline_keyboard: [
+        ...shown.map((row, i) => ([{
+          text: truncateButton(`${i + 1}. ${row.title}${row.running ? '' : ' · 冷'}`),
+          callback_data: `${SID_CB}${i}`,
+        }])),
+        [{ text: '← 返回工作区', callback_data: BACK_WS_CB }],
+      ],
+    }
+    const body = [
+      `工作区：${workspace.title}`,
+      workspace.path,
+      '',
+      `选择会话（共 ${sessions.length} 个）：`,
+      '',
+      ...shown.map((row, i) => {
+        const mark = row.running ? '运行中' : '未附着'
+        return `${i + 1}. ${row.title}\n   ${mark} · …${row.sessionId.slice(-12)}`
+      }),
+      sessions.length > MAX_BUTTONS ? `\n仅显示前 ${MAX_BUTTONS} 个会话。` : '',
+      '',
+      '点下方按钮附着；冷会话会自动 resume（不关闭 Web）。',
+    ].filter(Boolean).join('\n')
+    await this.client.sendMessage(chatId, body, undefined, keyboard)
+  }
+
+  private async bindSession(chatId: number, callbackId: string, row: SessionRow): Promise<void> {
+    const agent = await this.ensureLiveAgent(row.sessionId)
     if (!agent) {
-      await this.client.answerCallbackQuery(cq.id, '会话不存在')
+      await this.client.answerCallbackQuery(callbackId, '无法附着')
+      await this.client.sendMessage(chatId, MSG.RESUME_FAILED)
+      return
+    }
+    const parts = describeAgent(agent, 0, this.ctx)
+    const label = row.title && row.title !== row.sessionId
+      ? displayLabel({ ...parts, title: row.title })
+      : displayLabel(parts)
+    this.bindings.set(String(chatId), { chatId, sessionId: String(agent.id), label })
+    await this.client.answerCallbackQuery(callbackId, '已附着')
+    await this.client.sendMessage(chatId, MSG.BOUND(label))
+  }
+
+  private async sendModelPicker(chatId: number): Promise<void> {
+    const binding = this.bindings.get(String(chatId))
+    if (!binding) {
+      await this.client.sendMessage(chatId, MSG.NEED_BIND)
+      return
+    }
+    const agent = await this.ensureLiveAgent(binding.sessionId)
+    if (!agent) {
+      this.bindings.delete(String(chatId))
       await this.client.sendMessage(chatId, MSG.GONE)
       return
     }
-    const label = displayLabel(describeAgent(agent, 0, this.ctx))
-    this.bindings.set(String(chatId), { chatId, sessionId: String(agent.id), label })
-    await this.client.answerCallbackQuery(cq.id, '已附着')
-    await this.client.sendMessage(chatId, MSG.BOUND(label))
+    try {
+      const snap = await loadSessionModels(this.ctx, binding.sessionId)
+      if (!snap.routable) {
+        await this.client.sendMessage(chatId, MSG.MODEL_UNROUTABLE(formatModel(snap.current)))
+        return
+      }
+      if (snap.options.length === 0) {
+        await this.client.sendMessage(chatId, MSG.MODEL_EMPTY(formatModel(snap.current)))
+        return
+      }
+      const shown = snap.options.slice(0, MAX_BUTTONS)
+      const prev = this.pickers.get(String(chatId))
+      this.pickers.set(String(chatId), {
+        workspaces: prev?.workspaces ?? [],
+        sessions: prev?.sessions ?? [],
+        catalog: prev?.catalog,
+        models: shown,
+      })
+      const keyboard: InlineKeyboardMarkup = {
+        inline_keyboard: shown.map((opt, i) => ([{
+          text: truncateButton(
+            `${opt.label}${opt.provider === snap.current.provider && opt.model === snap.current.model ? ' ✓' : ''}`,
+          ),
+          callback_data: `${MODEL_CB}${i}`,
+        }])),
+      }
+      const body = [
+        `当前模型：${formatModel(snap.current)}`,
+        `会话：${binding.label}`,
+        '',
+        '选择新模型（下一回合生效）：',
+      ].join('\n')
+      await this.client.sendMessage(chatId, body, undefined, keyboard)
+    } catch (err) {
+      this.ctx.logger.warn(`dsh-telegram-channel: /model failed: ${this.redact(err)}`)
+      await this.client.sendMessage(chatId, MSG.MODEL_UNAVAILABLE)
+    }
+  }
+
+  private async sendEffortPicker(chatId: number, option: ModelOption): Promise<void> {
+    const efforts = option.efforts ?? []
+    const keyboard: InlineKeyboardMarkup = {
+      inline_keyboard: [
+        ...efforts.map((e, i) => ([{
+          text: truncateButton(e.name || e.id),
+          callback_data: `${EFFORT_CB}${i}`,
+        }])),
+        [{ text: '← 返回模型列表', callback_data: BACK_MODEL_CB }],
+      ],
+    }
+    await this.client.sendMessage(
+      chatId,
+      `已选 ${option.label}\n请选择 reasoning effort：`,
+      undefined,
+      keyboard,
+    )
+  }
+
+  private async applyModel(
+    chatId: number,
+    callbackId: string,
+    option: ModelOption,
+    reasoningEffort?: string,
+  ): Promise<void> {
+    const binding = this.bindings.get(String(chatId))
+    if (!binding) {
+      await this.client.answerCallbackQuery(callbackId, '未绑定')
+      await this.client.sendMessage(chatId, MSG.NEED_BIND)
+      return
+    }
+    try {
+      const selected = await selectSessionModel(this.ctx, binding.sessionId, {
+        provider: option.provider,
+        model: option.model,
+        reasoningEffort,
+      })
+      await this.client.answerCallbackQuery(callbackId, '已切换')
+      await this.client.sendMessage(chatId, MSG.MODEL_SET(formatModel(selected)))
+    } catch (err) {
+      this.ctx.logger.warn(`dsh-telegram-channel: selectModel failed: ${this.redact(err)}`)
+      await this.client.answerCallbackQuery(callbackId, '切换失败')
+      await this.client.sendMessage(chatId, MSG.MODEL_FAILED)
+    }
   }
 
   private liveAgents(): Agent[] {
@@ -209,27 +505,19 @@ export class TelegramBridge {
     return this.liveAgents().find((a) => String(a.id) === sessionId)
   }
 
-  private async sendSessionPicker(chatId: number): Promise<void> {
-    const agents = this.liveAgents()
-    if (agents.length === 0) {
-      await this.client.sendMessage(chatId, MSG.NO_LIVE)
-      return
+  /** Resume cold sessions when needed; never dispose the returned handle. */
+  private async ensureLiveAgent(sessionId: string): Promise<Agent | undefined> {
+    const live = this.findLiveAgent(sessionId)
+    if (live) return live
+    const agents = this.ctx.agents as { resume?: (opts: { resumeSessionId: ReturnType<typeof SessionId> }) => Promise<{ agent: Agent }> }
+    if (typeof agents.resume !== 'function') return undefined
+    try {
+      const handle = await agents.resume({ resumeSessionId: SessionId(sessionId) })
+      return handle.agent
+    } catch (err) {
+      this.ctx.logger.warn(`dsh-telegram-channel: resume failed for ${sessionId}: ${this.redact(err)}`)
+      return undefined
     }
-    const described = agents.map((agent, i) => describeAgent(agent, i, this.ctx))
-    const keyboard: InlineKeyboardMarkup = {
-      inline_keyboard: described.map((parts) => ([{
-        text: buttonLabel(parts),
-        callback_data: `${BIND_CB_PREFIX}${parts.sessionId}`,
-      }])),
-    }
-    const body = [
-      `选择要遥控的本机会话（共 ${agents.length} 个）：`,
-      '',
-      ...described.map((parts) => detailLines(parts)),
-      '',
-      '点下方按钮附着对应会话。',
-    ].join('\n')
-    await this.client.sendMessage(chatId, body, undefined, keyboard)
   }
 
   private async sendStatus(chatId: number): Promise<void> {
@@ -240,8 +528,7 @@ export class TelegramBridge {
     }
     const stillLive = this.findLiveAgent(binding.sessionId)
     if (!stillLive) {
-      this.bindings.delete(String(chatId))
-      await this.client.sendMessage(chatId, MSG.GONE)
+      await this.client.sendMessage(chatId, MSG.STATUS_BOUND_COLD(binding.label))
       return
     }
     await this.client.sendMessage(chatId, MSG.STATUS_BOUND(binding.label))
@@ -253,7 +540,7 @@ export class TelegramBridge {
       await this.client.sendMessage(chatId, MSG.NEED_BIND)
       return
     }
-    const agent = this.findLiveAgent(binding.sessionId)
+    const agent = await this.ensureLiveAgent(binding.sessionId)
     if (!agent) {
       this.bindings.delete(String(chatId))
       await this.client.sendMessage(chatId, MSG.GONE)
