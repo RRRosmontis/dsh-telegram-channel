@@ -37,10 +37,19 @@ Telegram **手机遥控器** for DeepSeek Harness：附着本机正在跑的 Web
 irm https://raw.githubusercontent.com/hi-wenw/dsh-telegram-channel/master/scripts/install.ps1 | iex
 ```
 
+> `install.ps1` 是引导脚本（兼容 `irm | iex`），会再下载并运行真正的菜单 `manage.ps1`。  
+> 不要直接 `irm .../manage.ps1 | iex`（带 `param` 会报错）。
+
 **CMD 一键：**
 
 ```bat
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/hi-wenw/dsh-telegram-channel/master/scripts/install.ps1 | iex"
+```
+
+备用（先下载再执行）：
+
+```bat
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -UseBasicParsing https://raw.githubusercontent.com/hi-wenw/dsh-telegram-channel/master/scripts/manage.ps1 -OutFile $env:TEMP\dsh-tg.ps1; & $env:TEMP\dsh-tg.ps1"
 ```
 
 启动后用**数字**选择：
