@@ -32,6 +32,16 @@ Telegram **手机遥控器** for DeepSeek Harness：附着本机正在跑的 Web
 2. 手机 Bot 发 `/sessions`，点选该对话  
 3. 之后手机 ↔ Web 走**同一条**轨迹
 
+### 效果截图
+
+手机选择会话并发问：
+
+![手机 Telegram：选择会话并对话](docs/screenshots/mobile-chat.jpg)
+
+电脑 Web 同步收到同一条消息与回复：
+
+![电脑 DSH Web：同轨迹同步](docs/screenshots/desktop-sync.jpg)
+
 ---
 
 ### 一键管理菜单（推荐）
@@ -222,6 +232,16 @@ dsh plugin --profile web add github:hi-wenw/dsh-telegram-channel
 ### What this is
 
 Telegram **mobile remote** for **live** DeepSeek Harness Web agents. Desktop/Web is the source of truth; the phone **attaches** (no parallel hidden agent).
+
+### Screenshots
+
+Phone: pick a live session and chat:
+
+![Telegram mobile remote](docs/screenshots/mobile-chat.jpg)
+
+Desktop Web shows the same trajectory:
+
+![DSH Web synced](docs/screenshots/desktop-sync.jpg)
 
 ### One-click manager (Windows)
 
