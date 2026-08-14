@@ -2,6 +2,8 @@
 
 [English](#english) · [中文](#中文)
 
+![dsh-telegram-channel flow: Desktop → Phone attach → Same trajectory](docs/screenshots/hero-flow.png)
+
 Telegram **手机遥控器** for DeepSeek Harness：附着本机正在跑的 Web 会话，与电脑 **同轨迹、双向可见**（Codex-style）。
 
 **发现：** [dsh-plugin topic](https://github.com/topics/dsh-plugin) · 安装：`dsh plugin --profile web add github:hi-wenw/dsh-telegram-channel`
