@@ -70,6 +70,9 @@ export type ParsedCommand =
   | { type: 'model'; text: string }
   | { type: 'status'; text: string }
   | { type: 'unbind'; text: string }
+  | { type: 'stop'; text: string }
+  | { type: 'mission'; text: string }
+  | { type: 'new'; text: string }
   | { type: 'unknown'; command: string; text: string }
   | { type: 'plain'; text: string }
 
@@ -95,6 +98,15 @@ export function parseCommand(text: string): ParsedCommand {
     case '/unbind':
     case '/disconnect':
       return { type: 'unbind', text }
+    case '/stop':
+    case '/halt':
+      return { type: 'stop', text }
+    case '/mission':
+    case '/todos':
+      return { type: 'mission', text }
+    case '/new':
+    case '/create':
+      return { type: 'new', text }
     default:
       return { type: 'unknown', command, text }
   }

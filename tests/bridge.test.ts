@@ -298,6 +298,10 @@ test('callback bind then plain text followups live agent; mirror assistant to ch
       data: { message: { content: [{ type: 'text', text: 'reply from agent' }] } },
     },
   )
+  // Delivery is intentionally resilient now (per-chunk retry + rich→HTML
+  // fallback), which lengthens the async microtask chain past this listener's
+  // void return — flush the event loop before asserting.
+  await new Promise((r) => setTimeout(r, 0))
   assert.ok(sent.some((m) => m.text.includes('reply from agent') || m.text.includes('reply')))
 
   await bridge.stop()

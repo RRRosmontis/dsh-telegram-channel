@@ -17,6 +17,11 @@ export type ApiProxySessions = {
         rpcId: string;
         payload: unknown;
     }) => Promise<unknown>;
+    /** Create a session (used by /new; payload: workspaceId | cwd). */
+    create?: (req: {
+        rpcId: string;
+        payload: unknown;
+    }) => Promise<unknown>;
 };
 export type ApiProxyLike = {
     workspace?: {

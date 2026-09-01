@@ -45,6 +45,15 @@ export type ParsedCommand = {
     type: 'unbind';
     text: string;
 } | {
+    type: 'stop';
+    text: string;
+} | {
+    type: 'mission';
+    text: string;
+} | {
+    type: 'new';
+    text: string;
+} | {
     type: 'unknown';
     command: string;
     text: string;
