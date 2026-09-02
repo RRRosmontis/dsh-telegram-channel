@@ -73,6 +73,7 @@ export type ParsedCommand =
   | { type: 'stop'; text: string }
   | { type: 'mission'; text: string }
   | { type: 'new'; text: string }
+  | { type: 'cancel'; text: string }
   | { type: 'unknown'; command: string; text: string }
   | { type: 'plain'; text: string }
 
@@ -107,6 +108,8 @@ export function parseCommand(text: string): ParsedCommand {
     case '/new':
     case '/create':
       return { type: 'new', text }
+    case '/cancel':
+      return { type: 'cancel', text }
     default:
       return { type: 'unknown', command, text }
   }

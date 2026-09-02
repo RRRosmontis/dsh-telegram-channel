@@ -54,6 +54,9 @@ export type ParsedCommand = {
     type: 'new';
     text: string;
 } | {
+    type: 'cancel';
+    text: string;
+} | {
     type: 'unknown';
     command: string;
     text: string;
