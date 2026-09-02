@@ -954,7 +954,12 @@ export class TelegramBridge {
   private async deliverHtml(chatId: number, markdown: string): Promise<void> {
     const chunks = splitMessage(markdown, this.maxMessageLength)
     for (const chunk of chunks) {
-      const html = markdownToHtml(chunk)
+      let html: string
+      try {
+        html = markdownToHtml(chunk)
+      } catch {
+        html = chunk // Pathological markdown input: degrade to plain text instead of dropping.
+      }
       try {
         await this.withRetry(() => this.client.sendMessage(chatId, html, 'HTML'))
       } catch {
