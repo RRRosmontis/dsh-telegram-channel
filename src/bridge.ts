@@ -126,27 +126,49 @@ interface ProjectionRegistryLike {
   snapshot?: (session: unknown) => { asOfSeq: number; values: Record<string, unknown> } | undefined
 }
 
-/** 手动压缩引擎（结构镜像 ctx.compaction.compactNow）。 */
-interface CompactionEngineLike {
-  compactNow?: (
+/**
+ * 命令运行时（结构镜像 ctx.commands.execute）。
+ *
+ * /compact 不在插件可见作用域内直接提供 compaction 服务（compaction-basic 挂载在
+ * 隔离作用域，ctx.get 取不到），但宿主命令运行时可见，且 command-compact 已把
+ * /compact 注册进该运行时的按 agent 作用层 —— Web 端正是用 execute() 派发它的。
+ * TG 端复用同一条通道：语义、busy/错误映射、命令生命周期日志与 Web 完全一致。
+ */
+interface CommandsRuntimeLike {
+  find?: (agent: unknown, name: string) => unknown
+  execute?: (
     agent: unknown,
+    line: string,
+    images: readonly unknown[],
     signal: AbortSignal,
-    sourceCommandId?: string,
-  ) => Promise<{
-    shadowedSeqs: number[]
-    shadowedTokenCount: number
-    summarySeq: number
-  } | null>
+  ) => Promise<{ commandId: string; result: { kind: string; text?: string } } | undefined>
 }
 
-/** 手动压缩的预期失败类（ManualCompactionError.code 的运行时字符串）。 */
-type CompactFailureCode = 'busy' | 'cancelled' | 'changed' | 'summary' | 'commit' | 'persistence'
+/** command-compact 的 CommandResult.kind 值。 */
+type CompactCommandKind = 'success' | 'error'
 
-function compactErrorCode(err: unknown): CompactFailureCode | undefined {
-  const code = (err as { code?: unknown } | undefined)?.code
-  if (code === 'busy' || code === 'cancelled' || code === 'changed'
-    || code === 'summary' || code === 'commit' || code === 'persistence') {
-    return code
+/**
+ * 把 command-compact 返回的英文结果翻译成 TG 中文回复。
+ * 文案以宿主 @deepseek-ai/dsh-command-compact 的固定输出为准；无法识别时返回
+ * undefined，由调用方回退为「压缩失败 + 原文详情」。
+ */
+function translateCompactResult(result: { kind: string; text?: string } | undefined): string | undefined {
+  const kind = result?.kind as CompactCommandKind | undefined
+  const text = result?.text ?? ''
+  if (kind === 'success') {
+    const m = /Compacted (\d+) history items \(~(\d+) tokens\)/.exec(text)
+    if (m) return MSG.COMPACT_DONE(Number(m[1]), Number(m[2]))
+    if (/No compactable history yet/.test(text)) return MSG.COMPACT_NOTHING
+    return undefined
+  }
+  if (kind === 'error') {
+    if (/active compaction|not idle/.test(text)) return MSG.COMPACT_BUSY
+    if (/^Compaction cancelled/.test(text)) return MSG.COMPACT_CANCELLED
+    if (/history selected for compaction changed/.test(text)) return MSG.COMPACT_CHANGED
+    if (/could not produce a useful summary/.test(text)) return MSG.COMPACT_SUMMARY_FAILED
+    if (/did not finish cleanly/.test(text)) return MSG.COMPACT_COMMIT_FAILED
+    if (/could not be saved/.test(text)) return MSG.COMPACT_PERSIST_FAILED
+    return undefined
   }
   return undefined
 }
@@ -914,16 +936,16 @@ export class TelegramBridge {
   }
 
   // ── /compact：手动压缩当前绑定会话（需会话空闲）──
+  //
+  // 压缩引擎（compaction-basic）挂载在隔离作用域，插件 ctx 拿不到；但宿主的
+  // command-compact 已把 /compact 注册进命令运行时的按 agent 作用层（Web 端
+  // 同款通道），因此这里复用它：语义、busy/错误映射、命令生命周期日志与 Web
+  // 端 /compact 完全一致，且无需接触引擎内部。
 
   private async requestCompact(chatId: number): Promise<void> {
     const binding = this.bindings.get(String(chatId))
     if (!binding) {
       await this.client.sendMessage(chatId, MSG.NEED_BIND)
-      return
-    }
-    const engine = this.serviceOf<CompactionEngineLike>('compaction')
-    if (!engine?.compactNow) {
-      await this.client.sendMessage(chatId, MSG.COMPACT_UNAVAILABLE)
       return
     }
     if (this.compacting.has(binding.sessionId)) {
@@ -936,24 +958,24 @@ export class TelegramBridge {
       await this.client.sendMessage(chatId, MSG.GONE)
       return
     }
-    const controller = new AbortController()
-    let operation: Promise<{ shadowedSeqs: number[]; shadowedTokenCount: number; summarySeq: number } | null>
-    try {
-      // compactNow 在会话忙时同步抛 busy（runMaintenance 同步判定）。
-      operation = engine.compactNow(agent as never, controller.signal)
-    } catch (err) {
-      const code = compactErrorCode(err)
-      if (code === 'busy') {
-        await this.client.sendMessage(chatId, MSG.COMPACT_BUSY)
-        return
-      }
-      this.ctx.logger.warn(`dsh-telegram-channel: /compact rejected: ${this.redact(err)}`)
-      await this.client.sendMessage(chatId, MSG.COMPACT_FAILED(this.redact(err)))
+    const commands = this.serviceOf<CommandsRuntimeLike>('commands')
+    if (!commands?.execute || typeof commands.find !== 'function' || !commands.find(agent, 'compact')) {
+      await this.client.sendMessage(chatId, MSG.COMPACT_UNAVAILABLE)
       return
     }
+    // 会话正在跑任务时压缩会被拒（runMaintenance 忙）；提前提示避免「已开始→失败」两步。
+    const busy = this.busySessions.has(binding.sessionId)
+      || Boolean((agent as { phase?: { kind?: string } }).phase?.kind
+        && (agent as { phase?: { kind?: string } }).phase?.kind !== 'idle')
+    if (busy) {
+      await this.client.sendMessage(chatId, MSG.COMPACT_BUSY)
+      return
+    }
+    const controller = new AbortController()
     this.compacting.add(binding.sessionId)
     this.compactAborts.set(binding.sessionId, controller)
     await this.client.sendMessage(chatId, MSG.COMPACT_STARTED)
+    const operation = commands.execute(agent as never, '/compact', [], controller.signal)
     void this.runCompaction(chatId, binding.sessionId, operation, controller).catch((err) => {
       this.ctx.logger.error(`dsh-telegram-channel: /compact runner crashed: ${this.redact(err)}`)
     })
@@ -963,46 +985,32 @@ export class TelegramBridge {
   private async runCompaction(
     chatId: number,
     sessionId: string,
-    operation: Promise<{ shadowedSeqs: number[]; shadowedTokenCount: number; summarySeq: number } | null>,
+    operation: Promise<{ commandId: string; result: { kind: string; text?: string } } | undefined>,
     controller: AbortController,
   ): Promise<void> {
     try {
-      const result = await operation
-      if (result === null) {
-        await this.enqueueNotice(chatId, MSG.COMPACT_NOTHING)
-      } else {
-        await this.enqueueNotice(chatId, MSG.COMPACT_DONE(result.shadowedSeqs.length, result.shadowedTokenCount))
+      const execution = await operation
+      if (execution === undefined) {
+        // find() 通过但 execute 未命中：按未注册处理。
+        await this.enqueueNotice(chatId, MSG.COMPACT_UNAVAILABLE)
+        return
       }
+      const translated = translateCompactResult(execution.result)
+      if (translated !== undefined) {
+        await this.enqueueNotice(chatId, translated)
+        return
+      }
+      // 无法识别的结果：回退为通用失败 + 宿主原文。
+      const raw = execution.result?.text
+      await this.enqueueNotice(chatId, MSG.COMPACT_FAILED(raw))
     } catch (err) {
       if (controller.signal.aborted) {
         // 桥停止/热重载导致的取消：静默，不打扰（本实例正在退出）。
         this.ctx.logger.info('dsh-telegram-channel: compaction aborted by bridge stop')
         return
       }
-      const code = compactErrorCode(err)
-      switch (code) {
-        case 'cancelled':
-          await this.enqueueNotice(chatId, MSG.COMPACT_CANCELLED)
-          return
-        case 'changed':
-          await this.enqueueNotice(chatId, MSG.COMPACT_CHANGED)
-          return
-        case 'summary':
-          await this.enqueueNotice(chatId, MSG.COMPACT_SUMMARY_FAILED)
-          return
-        case 'commit':
-          await this.enqueueNotice(chatId, MSG.COMPACT_COMMIT_FAILED)
-          return
-        case 'persistence':
-          await this.enqueueNotice(chatId, MSG.COMPACT_PERSIST_FAILED)
-          return
-        case 'busy':
-          await this.enqueueNotice(chatId, MSG.COMPACT_BUSY)
-          return
-        default:
-          this.ctx.logger.warn(`dsh-telegram-channel: /compact failed: ${this.redact(err)}`)
-          await this.enqueueNotice(chatId, MSG.COMPACT_FAILED(this.redact(err)))
-      }
+      this.ctx.logger.warn(`dsh-telegram-channel: /compact failed: ${this.redact(err)}`)
+      await this.enqueueNotice(chatId, MSG.COMPACT_FAILED(this.redact(err)))
     } finally {
       this.compacting.delete(sessionId)
       this.compactAborts.delete(sessionId)

@@ -912,11 +912,11 @@ test('/compact compacts bound session and reports result', async () => {
       roots: () => [agent],
       get: (id: ReturnType<typeof SessionId>) => (String(id) === sessionId ? agent : undefined),
     },
-    compaction: {
-      compactNow: async () => ({
-        shadowedSeqs: [1, 2, 3, 4],
-        shadowedTokenCount: 12_345,
-        summarySeq: 9,
+    commands: {
+      find: () => true,
+      execute: async () => ({
+        commandId: 'cmd-1',
+        result: { kind: 'success', text: 'Compacted 4 history items (~12345 tokens).' },
       }),
     },
     on() { return () => {} },
@@ -962,10 +962,15 @@ test('/compact busy agent replies COMPACT_BUSY without starting', async () => {
       roots: () => [agent],
       get: (id: ReturnType<typeof SessionId>) => (String(id) === sessionId ? agent : undefined),
     },
-    compaction: {
-      compactNow: () => {
-        throw Object.assign(new Error('busy'), { code: 'busy' })
-      },
+    commands: {
+      find: () => true,
+      execute: async () => ({
+        commandId: 'cmd-busy',
+        result: {
+          kind: 'error',
+          text: 'Compaction is unavailable because this process has an active compaction, or the agent is not idle.',
+        },
+      }),
     },
     on() { return () => {} },
   }
@@ -987,11 +992,14 @@ test('/compact busy agent replies COMPACT_BUSY without starting', async () => {
   })
   sent.length = 0 // drop the BOUND message; keep only /compact replies
   await bridge.processUpdate(messageUpdate(10, 1, '/compact', 2))
-  assert.equal(sent.length, 1)
-  assert.equal(sent[0]!.text, MSG.COMPACT_BUSY)
+  assert.ok(sent.some((m) => m.text.includes('已开始压缩')), 'ack sent')
+  for (let i = 0; i < 100 && !sent.some((m) => m.text.includes(MSG.COMPACT_BUSY)); i++) {
+    await new Promise((r) => setTimeout(r, 5))
+  }
+  assert.ok(sent.some((m) => m.text === MSG.COMPACT_BUSY), 'busy notice arrives')
 })
 
-test('/compact without compaction engine reports unavailable', async () => {
+test('/compact without registered /compact command reports unavailable', async () => {
   const sent: SentMessage[] = []
   const followups: UserMessage[] = []
   const sessionId = 'live-noeng'
@@ -1002,6 +1010,9 @@ test('/compact without compaction engine reports unavailable', async () => {
       list: () => [agent],
       roots: () => [agent],
       get: (id: ReturnType<typeof SessionId>) => (String(id) === sessionId ? agent : undefined),
+    },
+    commands: {
+      find: () => undefined, // command not registered on this host
     },
     on() { return () => {} },
   }

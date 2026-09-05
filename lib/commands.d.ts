@@ -15,7 +15,7 @@ export declare const MSG: {
     readonly STATUS_BOUND: (label: string) => string;
     readonly STATUS_BOUND_COLD: (label: string) => string;
     readonly COMPACT_USAGE: "用法：/compact（无参数，压缩当前绑定会话的历史，缩短上下文）";
-    readonly COMPACT_UNAVAILABLE: "当前宿主未启用压缩服务（compaction 未装配），无法执行 /compact。";
+    readonly COMPACT_UNAVAILABLE: "当前宿主不可用压缩：/compact 命令未注册（需宿主启用压缩插件 command-compact / compaction-basic 后重启 dsh web）。";
     readonly COMPACT_STARTED: "已开始压缩会话历史…\n压缩会占用一个模型回合，期间新消息排队；完成或失败后会在这里报告结果。";
     readonly COMPACT_BUSY: "当前会话有任务正在运行（或压缩锁被占用），无法压缩。请等本轮结束（或 /stop）后再试。";
     readonly COMPACT_INFLIGHT: "该会话已在进行压缩，请稍候（完成后会报告结果）。";
