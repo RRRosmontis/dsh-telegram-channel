@@ -16,6 +16,7 @@ export const MSG = {
     '/help — 显示帮助',
     '',
     '绑定后直接发文字，消息会进入该本机会话；Web 与手机看到同一条轨迹。',
+    '直接发送图片（或带文字说明的图片）也会进入该会话，说明文字会一并作为消息文本。',
     '仅白名单用户可用。无会话时请先在 dsh web 开对话或保留历史会话。',
   ].join('\n'),
   NEED_BIND: '尚未绑定本机会话。请先发送 /sessions 选择一个。',
@@ -58,6 +59,13 @@ export const MSG = {
     return `${tip}\n详情：${detail}`
   },
   GONE: '绑定的会话已不可用。请重新 /sessions。',
+  MEDIA_UNSUPPORTED: '暂不支持该消息类型（支持文本与 png/jpeg/webp/gif 图片；语音/视频/其他文件请在 Web 端处理）。',
+  IMAGE_MODEL_UNSUPPORTED: '当前模型不支持图片输入，请在 Web 端或 /model 切换到多模态模型后重试。',
+  IMAGE_FAILED(detail?: string): string {
+    const tip = '图片发送失败。'
+    if (!detail) return tip
+    return `${tip}\n详情：${detail}`
+  },
   LAST_FAILED: '无法读取上次对话。请确认已绑定，且本机 dsh web / apiProxy 可用。',
   MODEL_UNAVAILABLE(detail?: string): string {
     const tip = '无法读取模型列表。请确认已绑定会话，且本机 dsh web 已加载 host-apiproxy。'

@@ -28,6 +28,8 @@ function fakeClient(
     sendChatAction: async () => true,
     answerCallbackQuery: async () => true,
     setMyCommands: async () => true,
+    getFile: async (fileId: string) => ({ file_id: fileId, file_unique_id: fileId, file_path: `path/${fileId}` }),
+    downloadFile: async () => new Uint8Array([1, 2, 3]),
     ...overrides,
   }
 }
@@ -1052,4 +1054,258 @@ test('/compact without bind prompts NEED_BIND', async () => {
   })
   await bridge.processUpdate(messageUpdate(10, 1, '/compact'))
   assert.equal(sent[0]?.text, MSG.NEED_BIND)
+})
+
+// ── 图片消息 ──
+
+type PromptPayload = { sessionId: string; mode: string; content: Array<{ type: string; text?: string; mediaType?: string; data?: string; name?: string }> }
+
+function photoUpdate(chatId: number, userId: number, fileId: string, opts?: {
+  caption?: string
+  mediaGroupId?: string
+  updateId?: number
+}): TelegramUpdate {
+  const updateId = opts?.updateId ?? 1
+  return {
+    update_id: updateId,
+    message: {
+      message_id: updateId,
+      date: 0,
+      chat: { id: chatId, type: 'private' },
+      from: { id: userId },
+      caption: opts?.caption,
+      media_group_id: opts?.mediaGroupId,
+      photo: [
+        { file_id: `${fileId}-small`, file_unique_id: `${fileId}-small`, width: 90, height: 90 },
+        { file_id: fileId, file_unique_id: fileId, width: 1280, height: 960, file_size: 300000 },
+      ],
+    },
+  }
+}
+
+function bindUpdate(chatId: number, userId: number, sessionId: string): TelegramUpdate {
+  return {
+    update_id: 1,
+    callback_query: {
+      id: 'bind',
+      from: { id: userId },
+      message: { message_id: 1, date: 0, chat: { id: chatId, type: 'private' } },
+      data: `${BIND_CB_PREFIX}${sessionId}`,
+    },
+  }
+}
+
+function imageBridgeCtx(sessionId: string, prompts: PromptPayload[], promptResult?: unknown) {
+  const agent = makeAgent(sessionId, [])
+  return {
+    agent,
+    ctx: {
+      logger: { info() {}, warn() {}, error() {} },
+      agents: {
+        list: () => [agent],
+        roots: () => [agent],
+        get: (id: ReturnType<typeof SessionId>) => (String(id) === sessionId ? agent : undefined),
+      },
+      apiProxy: {
+        sessions: {
+          prompt: async (req: { payload: unknown }) => {
+            prompts.push(req.payload as PromptPayload)
+            return promptResult ?? rpcOk({ accepted: true })
+          },
+        },
+      },
+      on() { return () => {} },
+    },
+  }
+}
+
+test('photo with caption is admitted via sessions.prompt (largest size, jpeg, base64)', async () => {
+  const sent: SentMessage[] = []
+  const prompts: PromptPayload[] = []
+  const sessionId = 'live-img'
+  const { ctx } = imageBridgeCtx(sessionId, prompts)
+  const jpegBytes = new Uint8Array([0xff, 0xd8, 1, 2, 3])
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent, {
+      getFile: async (fileId: string) => ({ file_id: fileId, file_unique_id: fileId, file_path: `dir/${fileId}` }),
+      downloadFile: async (filePath: string) => {
+        assert.ok(filePath.includes('big-photo'), 'downloads the largest photo size')
+        return jpegBytes
+      },
+    }),
+    sleep: async () => {},
+  })
+  await bridge.processUpdate(bindUpdate(10, 1, sessionId))
+  await bridge.processUpdate(photoUpdate(10, 1, 'big-photo', { caption: '看看这张图', updateId: 2 }))
+  assert.equal(prompts.length, 1, 'one prompt RPC')
+  const content = prompts[0]!.content
+  assert.deepEqual(content[0], { type: 'text', text: '看看这张图' })
+  assert.equal(content[1]?.type, 'image')
+  assert.equal(content[1]?.mediaType, 'image/jpeg')
+  assert.equal(content[1]?.data, Buffer.from(jpegBytes).toString('base64'))
+  assert.ok(!sent.some((m) => m.text === MSG.MEDIA_UNSUPPORTED), 'no unsupported notice')
+})
+
+test('image document (png) is admitted with its file name', async () => {
+  const sent: SentMessage[] = []
+  const prompts: PromptPayload[] = []
+  const sessionId = 'live-img-doc'
+  const { ctx } = imageBridgeCtx(sessionId, prompts)
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent),
+    sleep: async () => {},
+  })
+  await bridge.processUpdate(bindUpdate(10, 1, sessionId))
+  await bridge.processUpdate({
+    update_id: 2,
+    message: {
+      message_id: 2,
+      date: 0,
+      chat: { id: 10, type: 'private' },
+      from: { id: 1 },
+      document: {
+        file_id: 'doc-png',
+        file_unique_id: 'doc-png',
+        file_name: 'screenshot.png',
+        mime_type: 'image/png',
+        file_size: 5000,
+      },
+    },
+  })
+  assert.equal(prompts.length, 1)
+  const image = prompts[0]!.content.find((p) => p.type === 'image')
+  assert.equal(image?.mediaType, 'image/png')
+  assert.equal(image?.name, 'screenshot.png')
+})
+
+test('non-image document gets MEDIA_UNSUPPORTED and no prompt', async () => {
+  const sent: SentMessage[] = []
+  const prompts: PromptPayload[] = []
+  const sessionId = 'live-img-pdf'
+  const { ctx } = imageBridgeCtx(sessionId, prompts)
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent),
+    sleep: async () => {},
+  })
+  await bridge.processUpdate(bindUpdate(10, 1, sessionId))
+  sent.length = 0
+  await bridge.processUpdate({
+    update_id: 2,
+    message: {
+      message_id: 2,
+      date: 0,
+      chat: { id: 10, type: 'private' },
+      from: { id: 1 },
+      document: { file_id: 'doc-pdf', file_unique_id: 'doc-pdf', file_name: 'report.pdf', mime_type: 'application/pdf' },
+    },
+  })
+  assert.equal(prompts.length, 0, 'no prompt dispatched')
+  assert.ok(sent.some((m) => m.text === MSG.MEDIA_UNSUPPORTED), 'unsupported notice sent')
+})
+
+test('album photos collapse into a single prompt with all images', async () => {
+  const sent: SentMessage[] = []
+  const prompts: PromptPayload[] = []
+  const sessionId = 'live-img-album'
+  const { ctx } = imageBridgeCtx(sessionId, prompts)
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent),
+    sleep: async () => {},
+  })
+  await bridge.processUpdate(bindUpdate(10, 1, sessionId))
+  await bridge.processUpdate(photoUpdate(10, 1, 'album-1', { mediaGroupId: 'g1', updateId: 2 }))
+  await bridge.processUpdate(photoUpdate(10, 1, 'album-2', { mediaGroupId: 'g1', updateId: 3 }))
+  for (let i = 0; i < 500 && prompts.length === 0; i++) {
+    await new Promise((r) => setTimeout(r, 10))
+  }
+  assert.equal(prompts.length, 1, 'album debounced into one prompt')
+  assert.equal(prompts[0]!.content.filter((p) => p.type === 'image').length, 2)
+})
+
+test('model without image support replies IMAGE_MODEL_UNSUPPORTED', async () => {
+  const sent: SentMessage[] = []
+  const prompts: PromptPayload[] = []
+  const sessionId = 'live-img-nv'
+  const { ctx } = imageBridgeCtx(sessionId, prompts, {
+    rpcId: 'x',
+    result: {
+      ok: false,
+      error: {
+        code: 'attachment-error',
+        message: 'Model "deepseek-chat" does not support image input.',
+        details: { reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES' },
+      },
+    },
+  })
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent),
+    sleep: async () => {},
+  })
+  await bridge.processUpdate(bindUpdate(10, 1, sessionId))
+  sent.length = 0
+  await bridge.processUpdate(photoUpdate(10, 1, 'nv-photo', { updateId: 2 }))
+  for (let i = 0; i < 100 && sent.length === 0; i++) {
+    await new Promise((r) => setTimeout(r, 5))
+  }
+  assert.ok(sent.some((m) => m.text === MSG.IMAGE_MODEL_UNSUPPORTED), 'model unsupported notice')
+})
+
+test('photo download failure replies IMAGE_FAILED', async () => {
+  const sent: SentMessage[] = []
+  const prompts: PromptPayload[] = []
+  const sessionId = 'live-img-dl'
+  const { ctx } = imageBridgeCtx(sessionId, prompts)
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent, {
+      getFile: async () => { throw new Error('telegram timeout') },
+    }),
+    sleep: async () => {},
+  })
+  await bridge.processUpdate(bindUpdate(10, 1, sessionId))
+  sent.length = 0
+  await bridge.processUpdate(photoUpdate(10, 1, 'dl-photo', { updateId: 2 }))
+  for (let i = 0; i < 100 && sent.length === 0; i++) {
+    await new Promise((r) => setTimeout(r, 5))
+  }
+  assert.equal(prompts.length, 0, 'no prompt dispatched')
+  assert.ok(sent.some((m) => m.text.startsWith('图片发送失败。')), 'failure notice')
+})
+
+test('photo without bind prompts NEED_BIND and no prompt', async () => {
+  const sent: SentMessage[] = []
+  const prompts: PromptPayload[] = []
+  const ctx = {
+    logger: { info() {}, warn() {}, error() {} },
+    agents: { list: () => [], roots: () => [], get: () => undefined },
+    apiProxy: { sessions: { prompt: async (req: { payload: unknown }) => { prompts.push(req.payload as PromptPayload); return rpcOk({ accepted: true }) } } },
+    on() { return () => {} },
+  }
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent),
+    sleep: async () => {},
+  })
+  await bridge.processUpdate(photoUpdate(10, 1, 'unbound-photo', { updateId: 1 }))
+  assert.equal(prompts.length, 0)
+  assert.ok(sent.some((m) => m.text === MSG.NEED_BIND), 'NEED_BIND sent')
 })

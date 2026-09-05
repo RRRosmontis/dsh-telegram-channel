@@ -1,3 +1,5 @@
+import { Buffer } from 'node:buffer'
+import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -22,6 +24,7 @@ import {
   TelegramClient,
   type InlineKeyboardMarkup,
   type TelegramClientLike,
+  type TelegramMessage,
   type TelegramUpdate,
 } from './client.js'
 import { MSG, LAST_CB, parseCommand } from './commands.js'
@@ -147,6 +150,17 @@ interface CommandsRuntimeLike {
 /** command-compact 的 CommandResult.kind 值。 */
 type CompactCommandKind = 'success' | 'error'
 
+/** Wire prompt content part (mirrors host PromptContentPart): text or base64 image. */
+type WireContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; mediaType: string; data: string; name?: string }
+
+/** Host-admitted raster media types (@deepseek-ai/dsh-attachment). */
+const IMAGE_MEDIA_TYPES: readonly string[] = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+
+/** Album debounce window: TG emits each photo of an album as its own update. */
+const MEDIA_GROUP_WINDOW_MS = 1200
+
 /**
  * 把 command-compact 返回的英文结果翻译成 TG 中文回复。
  * 文案以宿主 @deepseek-ai/dsh-command-compact 的固定输出为准；无法识别时返回
@@ -248,6 +262,8 @@ export class TelegramBridge {
   private readonly compacting = new Set<string>()
   /** sessionId → compaction abort controller (cancelled on bridge stop) */
   private readonly compactAborts = new Map<string, AbortController>()
+  /** Album accumulation: chatId:media_group_id → parts buffered into one prompt. */
+  private readonly mediaGroups = new Map<string, { chatId: number; parts: WireContentPart[]; timer?: ReturnType<typeof setTimeout> }>()
 
   constructor(ctx: Context, options: TelegramBridgeOptions) {
     this.ctx = ctx
@@ -333,6 +349,8 @@ export class TelegramBridge {
     for (const controller of this.compactAborts.values()) controller.abort()
     this.compactAborts.clear()
     this.compacting.clear()
+    for (const group of this.mediaGroups.values()) clearTimeout(group.timer)
+    this.mediaGroups.clear()
     if (this.hookTimer) {
       clearTimeout(this.hookTimer)
       this.hookTimer = undefined
@@ -361,9 +379,22 @@ export class TelegramBridge {
       return
     }
 
-    // Non-text messages: tell the (authorized) user instead of dropping silently.
+    // Media messages: photos / image documents (optionally with a caption) are
+    // admitted into the bound session; other media get an explicit notice.
+    // A caption is treated as accompanying text — never parsed as a command.
+    const mediaParts = await this.collectMediaParts(chatId, message)
+    if (mediaParts !== undefined) {
+      if (mediaParts.length > 0) {
+        if (message.media_group_id) this.accumulateMediaGroup(chatId, message.media_group_id, mediaParts)
+        else await this.sendImageFollowup(chatId, mediaParts)
+      }
+      return
+    }
+
+    // Non-text messages without recognized media: tell the (authorized) user
+    // instead of dropping silently.
     if (!message.text) {
-      await this.enqueueNotice(chatId, '暂只支持文本消息（图片/语音/文件等媒体暂不处理）')
+      await this.enqueueNotice(chatId, MSG.MEDIA_UNSUPPORTED)
       return
     }
 
@@ -1038,6 +1069,135 @@ export class TelegramBridge {
       || Boolean((agent as { phase?: { kind?: string } }).phase?.kind
         && (agent as { phase?: { kind?: string } }).phase?.kind !== 'idle')
     agent.followup(message)
+    if (busy) {
+      await this.enqueueNotice(chatId, '已加入队列：当前任务完成后将处理这条消息')
+    }
+  }
+
+  /**
+   * Extract wire prompt parts from a media message.
+   * Returns undefined when the message carries no media at all; returns [] for
+   * an unsupported media type (the user was already notified); otherwise the
+   * caption text part (when present) followed by the image part.
+   */
+  private async collectMediaParts(chatId: number, message: TelegramMessage): Promise<WireContentPart[] | undefined> {
+    const caption = message.caption?.trim()
+    const textPart: WireContentPart | undefined = caption ? { type: 'text', text: caption } : undefined
+    const withText = (part: WireContentPart): WireContentPart[] =>
+      textPart ? [textPart, part] : [part]
+
+    if (message.photo && message.photo.length > 0) {
+      // TG photo sizes are ordered smallest → largest; the last is the best quality.
+      const best = message.photo[message.photo.length - 1]!
+      const part = await this.downloadImagePart(chatId, best.file_id, 'image/jpeg')
+      return part ? withText(part) : []
+    }
+
+    const doc = message.document
+    if (doc) {
+      if (!doc.mime_type || !IMAGE_MEDIA_TYPES.includes(doc.mime_type)) {
+        await this.enqueueNotice(chatId, MSG.MEDIA_UNSUPPORTED)
+        return []
+      }
+      const part = await this.downloadImagePart(chatId, doc.file_id, doc.mime_type, doc.file_name)
+      return part ? withText(part) : []
+    }
+
+    return undefined
+  }
+
+  /** Download one TG file and encode it as a canonical-base64 wire image part. */
+  private async downloadImagePart(
+    chatId: number,
+    fileId: string,
+    mediaType: string,
+    name?: string,
+  ): Promise<WireContentPart | undefined> {
+    try {
+      const file = await this.client.getFile(fileId)
+      if (!file.file_path) throw new Error('TG 未返回文件路径')
+      const bytes = await this.client.downloadFile(file.file_path)
+      // Buffer base64 is canonical (standard alphabet, no whitespace) — the host
+      // attachment admission rejects non-canonical forms outright.
+      const data = Buffer.from(bytes).toString('base64')
+      return { type: 'image', mediaType, data, ...(name === undefined ? {} : { name }) }
+    } catch (err) {
+      await this.enqueueNotice(chatId, MSG.IMAGE_FAILED(this.redact(err)))
+      return undefined
+    }
+  }
+
+  /**
+   * Album photos arrive as separate updates sharing a media_group_id — debounce
+   * them into ONE prompt so an album does not spawn N sequential turns.
+   */
+  private accumulateMediaGroup(chatId: number, groupId: string, parts: WireContentPart[]): void {
+    const key = `${String(chatId)}:${groupId}`
+    const existing = this.mediaGroups.get(key)
+    if (existing) {
+      clearTimeout(existing.timer)
+      existing.parts.push(...parts)
+    }
+    const entry = existing ?? { chatId, parts: [...parts] }
+    entry.timer = setTimeout(() => {
+      this.mediaGroups.delete(key)
+      this.sendImageFollowup(entry.chatId, entry.parts).catch((err) => {
+        this.ctx.logger.error(this.redact(err))
+      })
+    }, MEDIA_GROUP_WINDOW_MS)
+    this.mediaGroups.set(key, entry)
+  }
+
+  /**
+   * Dispatch an image-bearing message to the bound session through the host
+   * prompt RPC — the exact channel the Web composer uses. The host checks
+   * whether the current model accepts image input, admits the bytes into the
+   * durable attachment store, then queues the message on the agent (mode
+   * 'queue' — same semantics as the text path's agent.followup).
+   */
+  private async sendImageFollowup(chatId: number, parts: WireContentPart[]): Promise<void> {
+    const binding = this.bindings.get(String(chatId))
+    if (!binding) {
+      await this.client.sendMessage(chatId, MSG.NEED_BIND)
+      return
+    }
+    const agent = await this.ensureLiveAgent(binding.sessionId)
+    if (!agent) {
+      this.bindings.delete(String(chatId))
+      await this.client.sendMessage(chatId, MSG.GONE)
+      return
+    }
+    const proxy = resolveApiProxy(this.ctx)
+    if (!proxy?.sessions?.prompt) {
+      await this.enqueueNotice(chatId, '当前宿主不支持会话消息接口（sessions.prompt），无法发送图片。')
+      return
+    }
+    const busy = this.busySessions.has(binding.sessionId)
+      || Boolean((agent as { phase?: { kind?: string } }).phase?.kind
+        && (agent as { phase?: { kind?: string } }).phase?.kind !== 'idle')
+    type PromptResponse = { result?: { ok?: boolean; value?: { accepted?: boolean }; error?: { code?: string; message?: string; details?: { reason?: string } } } }
+    let res: PromptResponse | undefined
+    try {
+      res = await proxy.sessions.prompt({
+        rpcId: randomUUID(),
+        payload: { sessionId: binding.sessionId, mode: 'queue', content: parts },
+      }) as PromptResponse | undefined
+    } catch (err) {
+      await this.enqueueNotice(chatId, MSG.IMAGE_FAILED(this.redact(err)))
+      return
+    }
+    const result = res?.result
+    if (!result?.ok) {
+      const code = result?.error?.code
+      const message = String(result?.error?.message ?? '宿主未确认接收')
+      if (code === 'attachment-error' && result?.error?.details?.reason === 'MODEL_DOES_NOT_SUPPORT_IMAGES') {
+        await this.enqueueNotice(chatId, MSG.IMAGE_MODEL_UNSUPPORTED)
+      } else {
+        const detail = `${code ? `[${code}] ` : ''}${message}`.trim()
+        await this.enqueueNotice(chatId, MSG.IMAGE_FAILED(detail))
+      }
+      return
+    }
     if (busy) {
       await this.enqueueNotice(chatId, '已加入队列：当前任务完成后将处理这条消息')
     }

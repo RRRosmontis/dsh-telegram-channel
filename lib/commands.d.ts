@@ -28,6 +28,9 @@ export declare const MSG: {
     readonly COMPACT_PERSIST_FAILED: "压缩完成但保存失败。请检查本机存储与权限后重试。";
     readonly COMPACT_FAILED: (detail?: string) => string;
     readonly GONE: "绑定的会话已不可用。请重新 /sessions。";
+    readonly MEDIA_UNSUPPORTED: "暂不支持该消息类型（支持文本与 png/jpeg/webp/gif 图片；语音/视频/其他文件请在 Web 端处理）。";
+    readonly IMAGE_MODEL_UNSUPPORTED: "当前模型不支持图片输入，请在 Web 端或 /model 切换到多模态模型后重试。";
+    readonly IMAGE_FAILED: (detail?: string) => string;
     readonly LAST_FAILED: "无法读取上次对话。请确认已绑定，且本机 dsh web / apiProxy 可用。";
     readonly MODEL_UNAVAILABLE: (detail?: string) => string;
     readonly MODEL_UNROUTABLE: (current: string) => string;

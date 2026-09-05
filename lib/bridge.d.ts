@@ -53,6 +53,8 @@ export declare class TelegramBridge {
     private readonly compacting;
     /** sessionId → compaction abort controller (cancelled on bridge stop) */
     private readonly compactAborts;
+    /** Album accumulation: chatId:media_group_id → parts buffered into one prompt. */
+    private readonly mediaGroups;
     constructor(ctx: Context, options: TelegramBridgeOptions);
     /** Effective rendering mode for a chat: per-chat override, else the global mode. */
     private modeFor;
@@ -83,6 +85,28 @@ export declare class TelegramBridge {
     /** 等待压缩落定并汇报结果（不阻塞轮询循环）。 */
     private runCompaction;
     private followupBound;
+    /**
+     * Extract wire prompt parts from a media message.
+     * Returns undefined when the message carries no media at all; returns [] for
+     * an unsupported media type (the user was already notified); otherwise the
+     * caption text part (when present) followed by the image part.
+     */
+    private collectMediaParts;
+    /** Download one TG file and encode it as a canonical-base64 wire image part. */
+    private downloadImagePart;
+    /**
+     * Album photos arrive as separate updates sharing a media_group_id — debounce
+     * them into ONE prompt so an album does not spawn N sequential turns.
+     */
+    private accumulateMediaGroup;
+    /**
+     * Dispatch an image-bearing message to the bound session through the host
+     * prompt RPC — the exact channel the Web composer uses. The host checks
+     * whether the current model accepts image input, admits the bytes into the
+     * durable attachment store, then queues the message on the agent (mode
+     * 'queue' — same semantics as the text path's agent.followup).
+     */
+    private sendImageFollowup;
     private pollLoop;
     private interruptibleDelay;
     private interruptibleSleep;
