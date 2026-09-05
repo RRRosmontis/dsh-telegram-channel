@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { rmSync } from 'node:fs'
 import type { UserMessage } from '@deepseek-ai/dsh-llm/types'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
 import { TelegramBridge } from '../src/bridge.ts'
@@ -648,4 +649,396 @@ test('/unbind clears binding without needing create/dispose', async () => {
   await bridge.processUpdate(messageUpdate(10, 1, 'again', 3))
   assert.equal(sent.at(-1)?.text, MSG.NEED_BIND)
   assert.equal(followups.length, 0)
+})
+
+// ── /rich: per-chat rendering mode (rich messages need a recent client) ──
+
+function renderHarness(
+  id: string,
+  sent: SentMessage[],
+  rich: string[],
+  followups: UserMessage[],
+): {
+  bridge: TelegramBridge
+  emitAssistant: (text: string) => Promise<void>
+} {
+  const agent = makeAgent(id, followups)
+  let sessionListener: ((session: { id: ReturnType<typeof SessionId> }, event: unknown) => void) | undefined
+  const ctx = {
+    logger: { info() {}, warn() {}, error() {} },
+    agents: {
+      list: () => [agent],
+      roots: () => [agent],
+      get: (sid: ReturnType<typeof SessionId>) => (String(sid) === id ? agent : undefined),
+    },
+    on(event: string, listener: (session: { id: ReturnType<typeof SessionId> }, event: unknown) => void) {
+      if (event === 'session/event') sessionListener = listener
+      return () => {}
+    },
+  }
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent, {
+      sendRichMessage: async (chatId, markdown) => {
+        rich.push(markdown)
+        return { message_id: 1, date: 0, chat: { id: chatId, type: 'private' }, text: markdown }
+      },
+    }),
+    sleep: async () => {},
+  })
+  bridge.start()
+  const emitAssistant = async (text: string): Promise<void> => {
+    await sessionListener?.(
+      { id: SessionId(id) },
+      { type: 'assistant/message', data: { message: { content: [{ type: 'text', text }] } } },
+    )
+    // deliver() chains async work past the listener's void return — flush.
+    await new Promise((r) => setTimeout(r, 0))
+  }
+  return { bridge, emitAssistant }
+}
+
+test('default rendering is HTML compat (no rich messages unless /rich on)', async () => {
+  const sent: SentMessage[] = []
+  const rich: string[] = []
+  const followups: UserMessage[] = []
+  const bindingsFile = `/tmp/dsh-tg-test-bindings-default.json`
+  process.env.DSH_TELEGRAM_BINDINGS_FILE = bindingsFile
+  try {
+    const { bridge, emitAssistant } = renderHarness('live-render-1', sent, rich, followups)
+    await bridge.processUpdate({
+      update_id: 1,
+      callback_query: {
+        id: 'cq',
+        from: { id: 1 },
+        message: { message_id: 1, date: 0, chat: { id: 10, type: 'private' } },
+        data: `${BIND_CB_PREFIX}live-render-1`,
+      },
+    })
+    await emitAssistant('default-mode reply')
+    assert.equal(rich.length, 0, 'no rich message without /rich on')
+    assert.ok(sent.some((m) => m.text.includes('default-mode reply')))
+    await bridge.stop()
+  } finally {
+    delete process.env.DSH_TELEGRAM_BINDINGS_FILE
+    rmSync(bindingsFile, { force: true })
+  }
+})
+
+test('/rich on routes replies to sendRichMessage; /rich off reverts to HTML; status reports state', async () => {
+  const sent: SentMessage[] = []
+  const rich: string[] = []
+  const followups: UserMessage[] = []
+  const bindingsFile = `/tmp/dsh-tg-test-bindings-rich.json`
+  process.env.DSH_TELEGRAM_BINDINGS_FILE = bindingsFile
+  try {
+    const { bridge, emitAssistant } = renderHarness('live-render-2', sent, rich, followups)
+    await bridge.processUpdate({
+      update_id: 1,
+      callback_query: {
+        id: 'cq',
+        from: { id: 1 },
+        message: { message_id: 1, date: 0, chat: { id: 10, type: 'private' } },
+        data: `${BIND_CB_PREFIX}live-render-2`,
+      },
+    })
+    // Default: HTML compat → no rich send yet.
+    await emitAssistant('before toggle')
+    assert.equal(rich.length, 0)
+
+    // /rich (no arg) reports current state.
+    await bridge.processUpdate(messageUpdate(10, 1, '/rich', 2))
+    assert.match(sent.at(-1)!.text, /HTML 兼容/)
+
+    // /rich on → assistant replies go through sendRichMessage.
+    await bridge.processUpdate(messageUpdate(10, 1, '/rich on', 3))
+    assert.match(sent.at(-1)!.text, /已切换为富文本/)
+    await emitAssistant('rich-mode reply')
+    assert.equal(rich.length, 1)
+    assert.match(rich[0]!, /rich-mode reply/)
+
+    // /rich on again is idempotent (still one preference, no dupes).
+    await bridge.processUpdate(messageUpdate(10, 1, '/rich on', 4))
+    assert.ok(!sent.at(-1)!.text.includes('已切换') || rich.length === 1)
+
+    // /rich off → back to HTML compat path.
+    await bridge.processUpdate(messageUpdate(10, 1, '/rich off', 5))
+    assert.match(sent.at(-1)!.text, /已切换为 HTML/)
+    await emitAssistant('compat-mode reply')
+    assert.equal(rich.length, 1, 'no new rich send after /rich off')
+    assert.ok(sent.some((m) => m.text.includes('compat-mode reply')))
+
+    await bridge.stop()
+  } finally {
+    delete process.env.DSH_TELEGRAM_BINDINGS_FILE
+    rmSync(bindingsFile, { force: true })
+  }
+})
+
+// ── /status 通用状态显示（对齐 Web 底部统计条）──
+
+test('/status shows bind/session/workspace/model/effort/context and web-style stats', async () => {
+  const sent: SentMessage[] = []
+  const followups: UserMessage[] = []
+  const sessionId = 'live-st'
+  const agent = makeAgent(sessionId, followups, { cwd: '/work/proj-a', title: '演示任务' })
+  const ctx = {
+    logger: { info() {}, warn() {}, error() {} },
+    agents: {
+      list: () => [agent],
+      roots: () => [agent],
+      get: (id: ReturnType<typeof SessionId>) => (String(id) === sessionId ? agent : undefined),
+    },
+    apiProxy: {
+      workspace: {
+        list: async () => rpcOk({
+          items: [{
+            workspaceId: 'w1',
+            path: '/work/proj-a',
+            title: 'Proj A',
+            sessionIds: [sessionId],
+          }],
+          archivedSessionIds: [],
+        }),
+      },
+      sessions: {
+        list: async () => rpcOk({
+          items: [{
+            sessionId,
+            updatedAt: 1,
+            running: true,
+            blank: false,
+            cwd: '/work/proj-a',
+          }],
+        }),
+        models: async () => rpcOk({
+          current: { provider: 'deepseek', model: 'reasoner', reasoningEffort: 'high' },
+          routable: true,
+          groups: [],
+        }),
+      },
+    },
+    sessionProjections: {
+      snapshot: () => ({
+        asOfSeq: 0,
+        values: {
+          sessionStats: {
+            turns: 3,
+            steps: 5,
+            llmMs: 4200,
+            toolMs: 2100,
+            ttftMs: 1500,
+            ttftSteps: 5,
+            decodeMs: 6000,
+            decodeTokens: 3000,
+          },
+          tokenUsage: {
+            uncachedInputTokens: 3000,
+            cacheReadTokens: 21000,
+            cacheWriteTokens: 500,
+            outputTokens: 9000,
+          },
+          contextPressure: {
+            contextWindow: 131072,
+            projectedTokens: 64536,
+          },
+        },
+      }),
+    },
+    on() { return () => {} },
+  }
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent),
+    sleep: async () => {},
+  })
+  // bind via legacy callback, then ask for status
+  await bridge.processUpdate({
+    update_id: 1,
+    callback_query: {
+      id: 'bind',
+      from: { id: 1 },
+      message: { message_id: 1, date: 0, chat: { id: 10, type: 'private' } },
+      data: `${BIND_CB_PREFIX}${sessionId}`,
+    },
+  })
+  await bridge.processUpdate(messageUpdate(10, 1, '/status', 2))
+  const text = sent.at(-1)!.text
+  assert.ok(text.includes('会话 ID：live-st'), text)
+  assert.ok(text.includes('工作区：Proj A（/work/proj-a）'), text)
+  assert.ok(text.includes('模型：deepseek/reasoner'), text)
+  assert.ok(text.includes('思考强度：高（high）'), text)
+  assert.ok(text.includes('上下文：64.5K / 131K tokens（49%）'), text)
+  assert.ok(text.includes('3 轮 · 5 步'), text)
+  assert.ok(text.includes('首 token 平均 0.3s'), text)
+  assert.ok(text.includes('500 tok/s'), text)
+  assert.ok(text.includes('缓存命中'), text)
+  assert.ok(text.includes('输入 24.5K tok · 输出 9K tok'), text)
+})
+
+test('/status without bind prompts NEED_BIND', async () => {
+  const sent: SentMessage[] = []
+  const ctx = {
+    logger: { info() {}, warn() {}, error() {} },
+    agents: { list: () => [], roots: () => [], get: () => undefined },
+    on() { return () => {} },
+  }
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent),
+    sleep: async () => {},
+  })
+  await bridge.processUpdate(messageUpdate(10, 1, '/status'))
+  assert.equal(sent[0]?.text, MSG.STATUS_NONE)
+})
+
+// ── /compact 手动压缩 ──
+
+test('/compact compacts bound session and reports result', async () => {
+  const sent: SentMessage[] = []
+  const followups: UserMessage[] = []
+  const sessionId = 'live-cc'
+  const agent = makeAgent(sessionId, followups)
+  const ctx = {
+    logger: { info() {}, warn() {}, error() {} },
+    agents: {
+      list: () => [agent],
+      roots: () => [agent],
+      get: (id: ReturnType<typeof SessionId>) => (String(id) === sessionId ? agent : undefined),
+    },
+    compaction: {
+      compactNow: async () => ({
+        shadowedSeqs: [1, 2, 3, 4],
+        shadowedTokenCount: 12_345,
+        summarySeq: 9,
+      }),
+    },
+    on() { return () => {} },
+  }
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent),
+    sleep: async () => {},
+  })
+  await bridge.processUpdate({
+    update_id: 1,
+    callback_query: {
+      id: 'bind',
+      from: { id: 1 },
+      message: { message_id: 1, date: 0, chat: { id: 10, type: 'private' } },
+      data: `${BIND_CB_PREFIX}${sessionId}`,
+    },
+  })
+  await bridge.processUpdate(messageUpdate(10, 1, '/compact', 2))
+  assert.ok(sent.some((m) => m.text.includes('已开始压缩')), 'ack sent')
+  // runCompaction runs detached; wait for its result notice
+  for (let i = 0; i < 100 && !sent.some((m) => m.text.includes('压缩完成')); i++) {
+    await new Promise((r) => setTimeout(r, 5))
+  }
+  assert.ok(sent.some((m) => m.text.includes('压缩完成')), 'compaction result notice arrives')
+  assert.ok(
+    sent.some((m) => m.text.includes('4 条历史记录（约 12345 tokens）')),
+    'result mentions shadowed range',
+  )
+})
+
+test('/compact busy agent replies COMPACT_BUSY without starting', async () => {
+  const sent: SentMessage[] = []
+  const followups: UserMessage[] = []
+  const sessionId = 'live-busy'
+  const agent = makeAgent(sessionId, followups)
+  const ctx = {
+    logger: { info() {}, warn() {}, error() {} },
+    agents: {
+      list: () => [agent],
+      roots: () => [agent],
+      get: (id: ReturnType<typeof SessionId>) => (String(id) === sessionId ? agent : undefined),
+    },
+    compaction: {
+      compactNow: () => {
+        throw Object.assign(new Error('busy'), { code: 'busy' })
+      },
+    },
+    on() { return () => {} },
+  }
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent),
+    sleep: async () => {},
+  })
+  await bridge.processUpdate({
+    update_id: 1,
+    callback_query: {
+      id: 'bind',
+      from: { id: 1 },
+      message: { message_id: 1, date: 0, chat: { id: 10, type: 'private' } },
+      data: `${BIND_CB_PREFIX}${sessionId}`,
+    },
+  })
+  sent.length = 0 // drop the BOUND message; keep only /compact replies
+  await bridge.processUpdate(messageUpdate(10, 1, '/compact', 2))
+  assert.equal(sent.length, 1)
+  assert.equal(sent[0]!.text, MSG.COMPACT_BUSY)
+})
+
+test('/compact without compaction engine reports unavailable', async () => {
+  const sent: SentMessage[] = []
+  const followups: UserMessage[] = []
+  const sessionId = 'live-noeng'
+  const agent = makeAgent(sessionId, followups)
+  const ctx = {
+    logger: { info() {}, warn() {}, error() {} },
+    agents: {
+      list: () => [agent],
+      roots: () => [agent],
+      get: (id: ReturnType<typeof SessionId>) => (String(id) === sessionId ? agent : undefined),
+    },
+    on() { return () => {} },
+  }
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent),
+    sleep: async () => {},
+  })
+  await bridge.processUpdate({
+    update_id: 1,
+    callback_query: {
+      id: 'bind',
+      from: { id: 1 },
+      message: { message_id: 1, date: 0, chat: { id: 10, type: 'private' } },
+      data: `${BIND_CB_PREFIX}${sessionId}`,
+    },
+  })
+  await bridge.processUpdate(messageUpdate(10, 1, '/compact', 2))
+  assert.equal(sent.at(-1)!.text, MSG.COMPACT_UNAVAILABLE)
+})
+
+test('/compact without bind prompts NEED_BIND', async () => {
+  const sent: SentMessage[] = []
+  const ctx = {
+    logger: { info() {}, warn() {}, error() {} },
+    agents: { list: () => [], roots: () => [], get: () => undefined },
+    on() { return () => {} },
+  }
+  const bridge = new TelegramBridge(ctx as any, {
+    token: 't',
+    allowedUserIds: [1],
+    allowAllUsers: false,
+    client: fakeClient(sent),
+    sleep: async () => {},
+  })
+  await bridge.processUpdate(messageUpdate(10, 1, '/compact'))
+  assert.equal(sent[0]?.text, MSG.NEED_BIND)
 })

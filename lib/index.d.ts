@@ -9,6 +9,8 @@ export interface TelegramChannelConfig {
     allowAllUsers?: boolean;
     maxMessageLength?: number;
     pollingTimeoutSec?: number;
+    /** 'rich' = Telegram native Rich Messages (needs a recent client);
+     *  anything else (default) = HTML compatibility mode that renders on all clients. */
     rendering?: string;
 }
 export declare const Config: Schema<TelegramChannelConfig>;

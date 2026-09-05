@@ -120,14 +120,15 @@ curl -fsSL https://raw.githubusercontent.com/hi-wenw/dsh-telegram-channel/master
 4. 需要换模型时：`/model` → 点选（与 Web 同 API，下一回合生效）  
 5. 续接上下文：附着后点 **查看上次对话**，或发 `/last`
 
-输入框旁的 **/** 菜单应有：`start` `sessions` `last` `model` `status` `unbind` `help`。
+输入框旁的 **/** 菜单应有：`start` `sessions` `last` `model` `status` `compact` `unbind` `help`。
 
 | 命令 | 作用 |
 |---|---|
 | `/sessions` | 先列工作区，再列该工作区会话（与 Web 对齐，排除归档/空白/子代理）；冷会话附着时会自动 resume |
 | `/last` | 查看绑定会话的**上次问答**（附着后也会出现「查看上次对话」按钮） |
 | `/model` | 切换当前绑定会话的模型 |
-| `/status` | 当前绑定 |
+| `/status` | 通用状态显示：绑定会话/会话 ID/工作区/当前模型/思考强度/上下文长度/首 token 平均/输出速率/输入输出 tokens（与 Web 底部统计条同源） |
+| `/compact` | 手动压缩当前绑定会话的历史（缩短上下文；会话需空闲，压缩期间新消息排队） |
 | `/unbind` | 只断开手机，**不关**电脑会话 |
 | `/help` | 帮助 |
 

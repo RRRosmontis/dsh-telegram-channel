@@ -18,7 +18,12 @@ export declare class TelegramBridge {
     private readonly client;
     private readonly sleep;
     private readonly maxMessageLength;
+    /** Global rendering mode: follows config; flipped to 'html' permanently when the
+     *  Rich Message API itself is unavailable (a server-wide fact, not per-chat). */
     private renderingMode;
+    /** Per-chat rendering override (persisted): rich messages need a recent Telegram
+     *  client — old ones (e.g. 10.x) cannot render them and show “unsupported”. */
+    private readonly renderPrefs;
     private readonly bindings;
     private readonly pickers;
     /** chatId → model awaiting reasoning-effort pick (kept outside picker so list refreshes won't drop it). */
@@ -44,7 +49,13 @@ export declare class TelegramBridge {
     private readonly callNames;
     /** sessionId → latest todo snapshot (/mission) */
     private readonly lastTodos;
+    /** sessionId → in-flight manual compaction (dedup /compact) */
+    private readonly compacting;
+    /** sessionId → compaction abort controller (cancelled on bridge stop) */
+    private readonly compactAborts;
     constructor(ctx: Context, options: TelegramBridgeOptions);
+    /** Effective rendering mode for a chat: per-chat override, else the global mode. */
+    private modeFor;
     start(): void;
     stop(): Promise<void>;
     processUpdate(update: TelegramUpdate): Promise<void>;
@@ -62,19 +73,30 @@ export declare class TelegramBridge {
     /** Resume cold sessions when needed; never dispose the returned handle. */
     private ensureLiveAgent;
     private sendStatus;
+    /** 按 sessionId 解析工作区：apiProxy 目录优先，冷/热会话均可用；退化为 agent cwd。 */
+    private workspaceOf;
+    /** 从 sessionProjections 快照读 Web 底部同款统计（sessionStats/tokenUsage/contextPressure）。 */
+    private readRuntimeValues;
+    /** 按名称解析宿主服务（Cordis 需 ctx.get；mock/plain ctx 走自有属性兜底）。 */
+    private serviceOf;
+    private requestCompact;
+    /** 等待压缩落定并汇报结果（不阻塞轮询循环）。 */
+    private runCompaction;
     private followupBound;
     private pollLoop;
     private interruptibleDelay;
     private interruptibleSleep;
     private onSessionEvent;
+    private handleRichCommand;
     private deliver;
     private deliverHtml;
     /** Retry an outbound call with capped linear backoff (500ms, 1s, 2s… max 4s). */
     private withRetry;
-    private escHtml;
     /**
-     * Send a notice; a leading `> ` renders as a Telegram blockquote (HTML).
-     * Falls back to plain text when the HTML send fails — a notice is never lost.
+     * Send a notice; a leading `> ` keeps the quote look via a plain-text `> `
+     * prefix. NB: NOT `<blockquote>` HTML — older Telegram clients cannot render
+     * the blockquote entity at all and show the whole message as “not supported”.
+     * Falls back to plain text when the send fails — a notice is never lost.
      */
     private deliverNotice;
     /** Serialized per-chat notice chain — bursts can't race into Telegram 429s. */
