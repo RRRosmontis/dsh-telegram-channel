@@ -7,6 +7,13 @@ import { TelegramBridge } from '../src/bridge.ts'
 import type { InlineKeyboardMarkup, TelegramClientLike, TelegramUpdate } from '../src/client.ts'
 import { BIND_CB_PREFIX, LAST_CB, MSG } from '../src/commands.ts'
 
+// 防呆（2026-09-14 事故）：binding 落盘路径 = DSH_HOME/telegram-channel-bindings.json。
+// 少数用例直接构造 bridge 并 bind，未设 DSH_TELEGRAM_BINDINGS_FILE，就把 fixture
+// （chatId 10 / live-img-dl）写进了真实文件、覆盖掉用户真实绑定。
+// 这里把 DSH_HOME 指向临时目录兜底：显式 override 的用例仍走自己的临时文件，
+// 漏设的用例只会写进临时 HOME。
+process.env.DSH_HOME = '/tmp/dsh-tg-test-home'
+
 type SentMessage = {
   chatId: number
   text: string
