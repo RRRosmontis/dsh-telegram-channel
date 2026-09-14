@@ -43,6 +43,8 @@ export declare class TelegramBridge {
     private hookTimer;
     private readonly pendingApprovalsTG;
     private disposeApprovalHook;
+    /** dsh 0.1.5 起 ask 走 'user-questions/request' waterfall（不再有 userQuestions.provider）。 */
+    private disposeUserQuestionHook;
     /** sessionId → thinking indicator state (one notice per reasoning phase) */
     private readonly thinkingSessions;
     /** callId → tool name (tool/result failure notices) */
@@ -130,12 +132,12 @@ export declare class TelegramBridge {
     private stopAllHeartbeats;
     private userQuestions;
     /**
-     * Wrap the UI provider's ask() so Telegram gets a parallel answer path.
-     * `Promise.race` decides; the UI path is untouched. The TG promise NEVER
-     * settles when there is no bound chat — race would kill the UI's window
-     * with that early rejection.
+     * dsh 0.1.5 移除了 `userQuestions.provider`：ask 现在走 'user-questions/request'
+     * waterfall（与 approval/request 同形），启动时注册一次即可，无需轮询 provider。
+     * 让 TG 答案与 next()（UI 转发）赛跑；未绑定聊天时 TG promise 永不 settle，
+     * 于是 race 完全跟随 next()。
      */
-    private hookUserQuestions;
+    private onUserQuestionRequest;
     private registerTgAsk;
     private settleGuiSide;
     private formatAskPending;

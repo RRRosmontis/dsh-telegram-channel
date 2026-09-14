@@ -252,6 +252,8 @@ export class TelegramBridge {
   private hookTimer: ReturnType<typeof setTimeout> | undefined
   private readonly pendingApprovalsTG = new Map<string, TgPendingApproval>()
   private disposeApprovalHook: (() => void) | undefined
+  /** dsh 0.1.5 起 ask 走 'user-questions/request' waterfall（不再有 userQuestions.provider）。 */
+  private disposeUserQuestionHook: (() => void) | undefined
   /** sessionId → thinking indicator state (one notice per reasoning phase) */
   private readonly thinkingSessions = new Map<string, boolean>()
   /** callId → tool name (tool/result failure notices) */
@@ -295,7 +297,10 @@ export class TelegramBridge {
     // Restore persisted bindings (survive hot reload / restart) and install
     // the TG answering hooks (ask_user dual-path + approval dual-path).
     this.loadBindings()
-    this.hookUserQuestions()
+    this.disposeUserQuestionHook?.()
+    this.disposeUserQuestionHook = (this.ctx as unknown as {
+      on: (event: string, handler: (req: unknown, next: () => Promise<unknown>) => Promise<unknown>) => () => void
+    }).on('user-questions/request', (req, next) => this.onUserQuestionRequest(req, next))
     this.disposeApprovalHook?.()
     this.disposeApprovalHook = (this.ctx as unknown as {
       on: (event: string, handler: (req: ApprovalRequestLike, next: () => Promise<string>) => Promise<string>) => () => void
@@ -355,6 +360,8 @@ export class TelegramBridge {
       clearTimeout(this.hookTimer)
       this.hookTimer = undefined
     }
+    this.disposeUserQuestionHook?.()
+    this.disposeUserQuestionHook = undefined
     this.disposeApprovalHook?.()
     this.disposeApprovalHook = undefined
     if (this.pollPromise) {
@@ -1525,61 +1532,22 @@ export class TelegramBridge {
   }
 
   /**
-   * Wrap the UI provider's ask() so Telegram gets a parallel answer path.
-   * `Promise.race` decides; the UI path is untouched. The TG promise NEVER
-   * settles when there is no bound chat — race would kill the UI's window
-   * with that early rejection.
+   * dsh 0.1.5 移除了 `userQuestions.provider`：ask 现在走 'user-questions/request'
+   * waterfall（与 approval/request 同形），启动时注册一次即可，无需轮询 provider。
+   * 让 TG 答案与 next()（UI 转发）赛跑；未绑定聊天时 TG promise 永不 settle，
+   * 于是 race 完全跟随 next()。
    */
-  private hookUserQuestions(attempt = 0): void {
+  private onUserQuestionRequest(req: unknown, next: () => Promise<unknown>): Promise<unknown> {
+    const tg = this.registerTgAsk(req)
+    let gui: Promise<unknown>
     try {
-      const provider = this.userQuestions()?.provider
-      if (provider) {
-        if (provider.__tgHooked && provider.__tgRealAsk) {
-          // Hot reload: re-point the wrapper at THIS bridge instance.
-          const realAsk = provider.__tgRealAsk
-          const self = this
-          provider.ask = function (request: unknown): Promise<unknown> {
-            const tg = self.registerTgAsk(request)
-            let gui: Promise<unknown>
-            try {
-              gui = realAsk(request)
-            } catch (err) {
-              tg.reject(err as Error)
-              throw err
-            }
-            void gui.then(() => self.settleGuiSide(request), () => self.settleGuiSide(request))
-            return Promise.race([tg.promise, gui])
-          }
-          return
-        }
-        const realAsk = provider.ask.bind(provider) as (request: unknown) => Promise<unknown>
-        provider.__tgRealAsk = realAsk
-        const self = this
-        provider.ask = function (request: unknown): Promise<unknown> {
-          const tg = self.registerTgAsk(request)
-          let gui: Promise<unknown>
-          try {
-            gui = realAsk(request)
-          } catch (err) {
-            tg.reject(err as Error)
-            throw err
-          }
-          void gui.then(() => self.settleGuiSide(request), () => self.settleGuiSide(request))
-          return Promise.race([tg.promise, gui])
-        }
-        provider.__tgHooked = true
-        this.ctx.logger.info('dsh-telegram-channel: ask_user TG answering hook installed')
-        return
-      }
+      gui = Promise.resolve().then(next)
     } catch (err) {
-      if (attempt === 0)
-        this.ctx.logger.warn(`dsh-telegram-channel: userQuestions hook deferred: ${this.redact(err)}`)
+      tg.reject(err as Error)
+      throw err
     }
-    if (attempt >= 30) {
-      this.ctx.logger.warn('dsh-telegram-channel: user-questions provider never appeared; TG answering disabled')
-      return
-    }
-    this.hookTimer = setTimeout(() => this.hookUserQuestions(attempt + 1), 2000)
+    void gui.then(() => this.settleGuiSide(req), () => this.settleGuiSide(req))
+    return Promise.race([tg.promise, gui])
   }
 
   private registerTgAsk(request: unknown): { promise: Promise<unknown>; reject: (err: Error) => void } {
