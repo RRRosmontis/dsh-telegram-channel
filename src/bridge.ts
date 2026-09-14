@@ -254,8 +254,6 @@ export class TelegramBridge {
   private disposeApprovalHook: (() => void) | undefined
   /** dsh 0.1.5 起 ask 走 'user-questions/request' waterfall（不再有 userQuestions.provider）。 */
   private disposeUserQuestionHook: (() => void) | undefined
-  /** sessionId → thinking indicator state (one notice per reasoning phase) */
-  private readonly thinkingSessions = new Map<string, boolean>()
   /** callId → tool name (tool/result failure notices) */
   private readonly callNames = new Map<string, string>()
   /** sessionId → latest todo snapshot (/mission) */
@@ -348,7 +346,6 @@ export class TelegramBridge {
     this.noticeQueue.clear()
     this.pendingAsks.clear()
     this.pendingApprovalsTG.clear()
-    this.thinkingSessions.clear()
     this.callNames.clear()
     this.lastTodos.clear()
     for (const controller of this.compactAborts.values()) controller.abort()
@@ -1276,7 +1273,6 @@ export class TelegramBridge {
 
     if (event.type === 'turn/end') {
       this.busySessions.delete(id)
-      this.thinkingSessions.delete(id)
       for (const b of targets) this.stopTypingHeartbeat(b.chatId)
       // Abnormal endings (API failure / abort / crash-recovery) must be
       // visible on the phone — previously they ended in silence.
@@ -1301,7 +1297,6 @@ export class TelegramBridge {
       // Progress summary; ask_user is owned by the provider hook (avoids duplicates).
       const name = event.data?.name ?? 'tool'
       if (name === 'ask_user_question') return
-      this.thinkingSessions.set(id, false)
       if (event.data?.callId !== undefined) {
         if (this.callNames.size > 400) {
           const first = this.callNames.keys().next().value
@@ -1319,23 +1314,8 @@ export class TelegramBridge {
 
     if (event.type === 'assistant/message') {
       const text = contentToText(event.data.message.content)
-      this.thinkingSessions.set(id, false)
       if (!text) return
       await Promise.all(targets.map((b) => this.deliver(b.chatId, text)))
-      return
-    }
-
-    if (event.type === 'assistant/chunk') {
-      // Thinking indicator: once per reasoning phase, status only (no content).
-      const chunk = event.data?.chunk as { type?: string; block?: { type?: string } } | undefined
-      const ctype = String(chunk?.type ?? '')
-      const btype = String(chunk?.block?.type ?? '')
-      const isReasoning = ctype.includes('reasoning') || btype.includes('reasoning') || btype.includes('think')
-      if (isReasoning && this.thinkingSessions.get(id) !== true) {
-        this.thinkingSessions.set(id, true)
-        for (const b of targets)
-          this.enqueueNotice(b.chatId, '> Thinking…')
-      }
       return
     }
 

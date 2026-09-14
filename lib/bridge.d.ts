@@ -45,8 +45,6 @@ export declare class TelegramBridge {
     private disposeApprovalHook;
     /** dsh 0.1.5 起 ask 走 'user-questions/request' waterfall（不再有 userQuestions.provider）。 */
     private disposeUserQuestionHook;
-    /** sessionId → thinking indicator state (one notice per reasoning phase) */
-    private readonly thinkingSessions;
     /** callId → tool name (tool/result failure notices) */
     private readonly callNames;
     /** sessionId → latest todo snapshot (/mission) */
