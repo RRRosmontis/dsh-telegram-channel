@@ -3,8 +3,8 @@ import Schema from '@deepseek-ai/schemastery'
 import { TelegramBridge } from './bridge.js'
 
 export const name = 'dsh-telegram-channel'
-/** agents: followup; apiProxy: workspace/session catalog + /model; userQuestions: TG answer hook (Cordis requires inject). */
-export const inject = ['agents', 'apiProxy', 'userQuestions']
+/** agents: followup; apiProxy and userQuestions are optional runtime services. */
+export const inject = ['agents']
 
 export interface TelegramChannelConfig {
   token?: string

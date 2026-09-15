@@ -1521,7 +1521,25 @@ export class TelegramBridge {
   // ── ask_user_question: TG answering via dual-path race with the UI ──
 
   private userQuestions(): UserQuestionsServiceLike | undefined {
-    return (this.ctx as unknown as { userQuestions?: UserQuestionsServiceLike }).userQuestions
+    const ctx = this.ctx as Context & {
+      get?: (name: string, strict?: boolean) => unknown
+      userQuestions?: UserQuestionsServiceLike
+    }
+    if (typeof ctx.get === 'function') {
+      try {
+        const service = ctx.get('userQuestions') as UserQuestionsServiceLike | undefined
+        if (service) return service
+      } catch {
+        // Continue to the plain-object fallback used by tests and simple hosts.
+      }
+    }
+    try {
+      return Object.prototype.hasOwnProperty.call(ctx, 'userQuestions')
+        ? ctx.userQuestions
+        : undefined
+    } catch {
+      return undefined
+    }
   }
 
   /**
