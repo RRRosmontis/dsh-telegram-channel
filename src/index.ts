@@ -3,8 +3,9 @@ import Schema from '@deepseek-ai/schemastery'
 import { TelegramBridge } from './bridge.js'
 
 export const name = 'dsh-telegram-channel'
-/** agents: followup; apiProxy: workspace/session catalog + /model (Cordis requires inject to read ctx.apiProxy). */
-export const inject = ['agents', 'apiProxy']
+/** agents: followup; apiProxy is optional and resolved at runtime via ctx.get;
+ *  when absent, catalog helpers degrade to the live-agents view. */
+export const inject = ['agents']
 
 export interface TelegramChannelConfig {
   token?: string
@@ -21,7 +22,7 @@ export const Config: Schema<TelegramChannelConfig> = Schema.object({
   allowAllUsers: Schema.boolean().default(false),
   maxMessageLength: Schema.number().default(4096),
   pollingTimeoutSec: Schema.number().default(30),
-  rendering: Schema.string().default('rich'),
+  rendering: Schema.string().default('html'),
 })
 
 function resolveAllowedUserIds(config: TelegramChannelConfig): number[] {
@@ -53,7 +54,7 @@ export function apply(ctx: Context, config: TelegramChannelConfig): void {
     allowAllUsers: config.allowAllUsers ?? false,
     maxMessageLength: config.maxMessageLength ?? 4096,
     pollingTimeoutSec: config.pollingTimeoutSec ?? 30,
-    rendering: config.rendering === 'html' ? 'html' : 'rich',
+    rendering: config.rendering === 'rich' ? 'rich' : 'html',
   })
   ctx.effect(() => {
     bridge.start()
