@@ -12,8 +12,8 @@ export interface TelegramChannelConfig {
   allowAllUsers?: boolean
   maxMessageLength?: number
   pollingTimeoutSec?: number
-  /** 'rich' = Telegram native Rich Messages (needs a recent client);
-   *  anything else (default) = HTML compatibility mode that renders on all clients. */
+  /** 默认 'rich' = Telegram native Rich Messages（需较新客户端）；
+   *  显式 'html'/'compat' 等其它值 = 兼容模式，所有客户端可显示。 */
   rendering?: string
 }
 
@@ -23,7 +23,7 @@ export const Config: Schema<TelegramChannelConfig> = Schema.object({
   allowAllUsers: Schema.boolean().default(false),
   maxMessageLength: Schema.number().default(4096),
   pollingTimeoutSec: Schema.number().default(30),
-  rendering: Schema.string().default('html'),
+  rendering: Schema.string().default('rich'),
 })
 
 function resolveAllowedUserIds(config: TelegramChannelConfig): number[] {

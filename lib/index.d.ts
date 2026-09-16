@@ -9,8 +9,8 @@ export interface TelegramChannelConfig {
     allowAllUsers?: boolean;
     maxMessageLength?: number;
     pollingTimeoutSec?: number;
-    /** 'rich' = Telegram native Rich Messages (needs a recent client);
-     *  anything else (default) = HTML compatibility mode that renders on all clients. */
+    /** 默认 'rich' = Telegram native Rich Messages（需较新客户端）；
+     *  显式 'html'/'compat' 等其它值 = 兼容模式，所有客户端可显示。 */
     rendering?: string;
 }
 export declare const Config: Schema<TelegramChannelConfig>;
