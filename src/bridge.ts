@@ -210,10 +210,8 @@ const REASONING_QUOTE_MAX_CHARS = 800
 
 /**
  * Assistant message → markdown for delivery. Reasoning (thinking) blocks are
- * kept as EXPANDABLE quotes (`**>`…`||` per Telegram's native markdown spec,
- * `<blockquote expandable>` in HTML mode) so they stay collapsed on the phone
- * and visually distinct from tool-call quotes; ordinary quotes in assistant
- * text remain plain blockquotes.
+ * kept, one `> ` quote line each — Telegram renders them as the accent-bar
+ * quote style the phone user expects for bash/thinking-style chatter.
  */
 function contentToText(content: readonly ContentBlock[]): string {
   const parts: string[] = []
@@ -225,13 +223,7 @@ function contentToText(content: readonly ContentBlock[]): string {
       if (!thinking) continue
       if (thinking.length > REASONING_QUOTE_MAX_CHARS)
         thinking = `${thinking.slice(0, REASONING_QUOTE_MAX_CHARS)}…`
-      // `||` would open/close spoiler entities in native markdown — neutralize.
-      const lines = thinking.replace(/\|\|/g, '｜｜').split('\n')
-      const last = lines.length - 1
-      parts.push([
-        '**>💭 思考过程',
-        ...lines.map((line, i) => `> ${line}${i === last ? '||' : ''}`),
-      ].join('\n'))
+      parts.push(thinking.split('\n').map((line) => `> ${line}`).join('\n'))
     }
   }
   return parts.join('\n\n')

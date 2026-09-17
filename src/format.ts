@@ -14,50 +14,20 @@ function inlineToHtml(text: string): string {
   return html
 }
 
-/**
- * Convert `> …` line groups into `<blockquote>` (Telegram renders it with the
- * accent-colored left bar). The native-markdown expandable-quote form
- * (`**>first line` … `last line||`) becomes `<blockquote expandable>` — used
- * for thinking blocks so they stay collapsed and distinct from tool-call
- * quotes (Telegram has no per-message quote color).
- */
-const EXPANDABLE_OPEN = '**>'
-
+/** Convert `> …` line groups into `<blockquote>` (Telegram renders it with the accent-colored left bar). */
 function blocksToHtml(text: string): string {
   const lines = text.split('\n')
   const out: string[] = []
   let quote: string[] = []
-  let expandable = false
   const flush = (): void => {
     if (quote.length === 0) return
-    const open = expandable ? '<blockquote expandable>' : '<blockquote>'
-    out.push(`${open}${inlineToHtml(quote.join('\n'))}</blockquote>`)
+    out.push(`<blockquote>${inlineToHtml(quote.join('\n'))}</blockquote>`)
     quote = []
-    expandable = false
   }
   for (const line of lines) {
-    if (line.startsWith(EXPANDABLE_OPEN)) {
-      flush()
-      expandable = true
-      let content = line.slice(EXPANDABLE_OPEN.length)
-      if (content.endsWith('||')) {
-        quote.push(content.slice(0, -2))
-        flush()
-      } else {
-        quote.push(content)
-      }
-    } else if (line.startsWith('> ')) {
-      let content = line.slice(2)
-      let closed = false
-      if (expandable && content.endsWith('||')) {
-        content = content.slice(0, -2)
-        closed = true
-      }
-      quote.push(content)
-      if (closed) flush()
-    } else if (line === '>') {
-      quote.push('')
-    } else {
+    if (line.startsWith('> ')) quote.push(line.slice(2))
+    else if (line === '>') quote.push('')
+    else {
       flush()
       out.push(inlineToHtml(line))
     }
