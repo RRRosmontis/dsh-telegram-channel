@@ -153,12 +153,17 @@ export class TelegramClient implements TelegramClientLike {
     return message.split(this.token).join('***')
   }
 
-  private async call<T>(method: string, body?: Record<string, unknown>): Promise<T> {
+  private async call<T>(method: string, body?: Record<string, unknown>, timeoutMs = 15_000): Promise<T> {
     const url = `${this.baseUrl}/bot${this.token}/${method}`
     try {
       const init: RequestInit = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        // Without a client-side timeout a stalled proxy connection hangs the
+        // request forever — and the serialized notice queue wedges behind it,
+        // silently swallowing every later tool/ask notice. TimeoutError is
+        // caught below and surfaces as a normal (retryable) failure.
+        signal: AbortSignal.timeout(timeoutMs),
       }
       if (body !== undefined) {
         init.body = JSON.stringify(body)
@@ -187,7 +192,8 @@ export class TelegramClient implements TelegramClientLike {
     if (offset !== undefined) {
       body.offset = offset
     }
-    return this.call<TelegramUpdate[]>('getUpdates', body)
+    // Long-poll: client-side abort must outlive the server-side hold.
+    return this.call<TelegramUpdate[]>('getUpdates', body, this.pollingTimeoutSec * 1000 + 10_000)
   }
 
   async sendMessage(

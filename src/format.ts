@@ -14,6 +14,28 @@ function inlineToHtml(text: string): string {
   return html
 }
 
+/** Convert `> …` line groups into `<blockquote>` (Telegram renders it with the accent-colored left bar). */
+function blocksToHtml(text: string): string {
+  const lines = text.split('\n')
+  const out: string[] = []
+  let quote: string[] = []
+  const flush = (): void => {
+    if (quote.length === 0) return
+    out.push(`<blockquote>${inlineToHtml(quote.join('\n'))}</blockquote>`)
+    quote = []
+  }
+  for (const line of lines) {
+    if (line.startsWith('> ')) quote.push(line.slice(2))
+    else if (line === '>') quote.push('')
+    else {
+      flush()
+      out.push(inlineToHtml(line))
+    }
+  }
+  flush()
+  return out.join('\n')
+}
+
 export function markdownToHtml(text: string): string {
   const parts = text.split(/```[\w-]*/)
   if (parts.length % 2 === 0) return inlineToHtml(text)
@@ -23,7 +45,7 @@ export function markdownToHtml(text: string): string {
       const code = parts[i]!.replace(/^\n/, '').replace(/\n$/, '')
       html += `<pre>${escapeHtml(code)}</pre>`
     } else {
-      html += inlineToHtml(parts[i]!)
+      html += blocksToHtml(parts[i]!)
     }
   }
   return html

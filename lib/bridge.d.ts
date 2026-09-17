@@ -43,8 +43,9 @@ export declare class TelegramBridge {
     private hookTimer;
     private readonly pendingApprovalsTG;
     private disposeApprovalHook;
-    /** dsh 0.1.5 起 ask 走 'user-questions/request' waterfall（不再有 userQuestions.provider）。 */
-    private disposeUserQuestionHook;
+    /** Prototype-ask interceptor state (see installAskInterceptor). */
+    private askInstalled;
+    private askRestore;
     /** callId → tool name (tool/result failure notices) */
     private readonly callNames;
     /** sessionId → latest todo snapshot (/mission) */
@@ -117,10 +118,10 @@ export declare class TelegramBridge {
     /** Retry an outbound call with capped linear backoff (500ms, 1s, 2s… max 4s). */
     private withRetry;
     /**
-     * Send a notice; a leading `> ` keeps the quote look via a plain-text `> `
-     * prefix. NB: NOT `<blockquote>` HTML — older Telegram clients cannot render
-     * the blockquote entity at all and show the whole message as “not supported”.
-     * Falls back to plain text when the send fails — a notice is never lost.
+     * Send a notice; a leading `> ` marks the body for quote rendering as a real
+     * `<blockquote>` (parse_mode HTML) — every current Telegram client draws the
+     * accent-colored left bar. Old-client compatibility is no longer required,
+     * but a failed HTML send still falls back to plain text — a notice is never lost.
      */
     private deliverNotice;
     /** Serialized per-chat notice chain — bursts can't race into Telegram 429s. */
@@ -128,18 +129,17 @@ export declare class TelegramBridge {
     private startTypingHeartbeat;
     private stopTypingHeartbeat;
     private stopAllHeartbeats;
-    private userQuestions;
-    /**
-     * dsh 0.1.5 移除了 `userQuestions.provider`：ask 现在走 'user-questions/request'
-     * waterfall（与 approval/request 同形），启动时注册一次即可，无需轮询 provider。
-     * 让 TG 答案与 next()（UI 转发）赛跑；未绑定聊天时 TG promise 永不 settle，
-     * 于是 race 完全跟随 next()。
-     */
-    private onUserQuestionRequest;
+    private installAskInterceptor;
+    private aroundUserQuestionAsk;
     private registerTgAsk;
+    /** Announce the incoming question, then one message per question (options as native inline-keyboard buttons). */
+    private deliverAskPrompt;
+    /** Resolve the pending ask once EVERY question has an answer (keyboard and/or text). */
+    private finalizeAskIfComplete;
     private settleGuiSide;
-    private formatAskPending;
     private handleTgAnswer;
+    /** Inline-keyboard tap on an ask message: toggle/record the choice, resolve when every question is answered. */
+    private handleAskCallback;
     private onApprovalRequest;
     private handleTgApproval;
     private stopBound;
