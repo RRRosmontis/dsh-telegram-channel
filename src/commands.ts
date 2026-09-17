@@ -111,6 +111,7 @@ export type ParsedCommand =
   | { type: 'status'; text: string }
   | { type: 'compact'; text: string }
   | { type: 'rich'; text: string; arg?: string }
+  | { type: 'goal'; text: string; arg?: string }
   | { type: 'unbind'; text: string }
   | { type: 'stop'; text: string }
   | { type: 'mission'; text: string }
@@ -140,6 +141,10 @@ export function parseCommand(text: string): ParsedCommand {
       return { type: 'status', text }
     case '/compact':
       return { type: 'compact', text }
+    case '/goal':
+    case '/目标':
+      // 目标语句是多词文本，保留完整参数（去掉命令名本身）
+      return { type: 'goal', text, arg: text.slice(command.length).trim() }
     case '/rich':
     case '/render':
     case '/setting': {

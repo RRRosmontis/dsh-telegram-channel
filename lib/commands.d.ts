@@ -68,6 +68,10 @@ export type ParsedCommand = {
     text: string;
     arg?: string;
 } | {
+    type: 'goal';
+    text: string;
+    arg?: string;
+} | {
     type: 'unbind';
     text: string;
 } | {

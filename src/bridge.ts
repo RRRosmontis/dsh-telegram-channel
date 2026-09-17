@@ -334,6 +334,7 @@ export class TelegramBridge {
       { command: 'model', description: '切换当前绑定会话的模型' },
       { command: 'status', description: '会话状态：模型/上下文/统计（首token/速率/tokens）' },
       { command: 'compact', description: '压缩当前会话历史（缩短上下文，空闲时执行）' },
+      { command: 'goal', description: '目标模式：/goal <目标>（clear/edit/pause/resume 管理）' },
       { command: 'rich', description: '渲染：on 富文本 / off HTML 兼容（本聊天，需新版客户端）' },
       { command: 'unbind', description: '断开手机绑定（不关闭本机会话）' },
       { command: 'stop', description: '中止当前正在运行的任务' },
@@ -450,6 +451,9 @@ export class TelegramBridge {
         return
       case 'compact':
         await this.requestCompact(chatId)
+        return
+      case 'goal':
+        await this.requestGoal(chatId, (parsed as { arg?: string }).arg)
         return
       case 'rich':
         await this.handleRichCommand(chatId, parsed.arg)
@@ -1050,6 +1054,41 @@ export class TelegramBridge {
     })
   }
 
+  /**
+   * TG /goal —— 走宿主命令运行时（commands.execute），与 Web 端 /goal 完全同一条
+   * 通道：command-goal 在宿主侧操作 session-log 支撑的 goals 域，不依赖 GUI 连接。
+   */
+  private async requestGoal(chatId: number, arg?: string): Promise<void> {
+    const binding = this.bindings.get(String(chatId))
+    if (!binding) {
+      await this.client.sendMessage(chatId, MSG.NEED_BIND)
+      return
+    }
+    const agent = await this.ensureLiveAgent(binding.sessionId)
+    if (!agent) {
+      this.bindings.delete(String(chatId))
+      await this.client.sendMessage(chatId, MSG.GONE)
+      return
+    }
+    const commands = this.serviceOf<CommandsRuntimeLike>('commands')
+    if (!commands?.execute || typeof commands.find !== 'function' || !commands.find(agent, 'goal')) {
+      await this.client.sendMessage(chatId, '当前环境不支持 /goal（command-goal 未装配）')
+      return
+    }
+    const line = `/goal${arg ? ` ${arg}` : ''}`
+    try {
+      const execution = await commands.execute(agent as never, line, [], new AbortController().signal)
+      if (execution === undefined) {
+        await this.client.sendMessage(chatId, '/goal 未执行：命令在运行时已注销')
+        return
+      }
+      const text = execution.result?.text ?? (execution.result?.kind === 'success' ? '完成' : '失败')
+      await this.client.sendMessage(chatId, text.slice(0, 3500))
+    } catch (err) {
+      await this.client.sendMessage(chatId, `/goal 执行失败：${this.redact(err).slice(0, 200)}`)
+    }
+  }
+
   /** 等待压缩落定并汇报结果（不阻塞轮询循环）。 */
   private async runCompaction(
     chatId: number,
@@ -1363,6 +1402,23 @@ export class TelegramBridge {
         const name = this.callNames.get(callKey) ?? 'tool'
         for (const b of targets)
           this.enqueueNotice(b.chatId, `> 工具 ${name} 失败：${String(data.error.name ?? 'Error')}${data.error.code ? `/${String(data.error.code)}` : ''}`)
+      }
+      return
+    }
+
+    // 'goal/changed' 不在本插件的 SessionEvent 类型联合内，宽松断言读取。
+    const eventType = (event as { type: string }).type
+    if (eventType === 'goal/changed') {
+      // Goal mode lives on the phone too: surface phase transitions (blocked/complete
+      // especially) without waiting for the next assistant text.
+      const data = (event as { data?: { phase?: string; blockedReason?: { code?: string; message?: string } } }).data
+      const phase = data?.phase
+      if (phase === 'blocked' || phase === 'complete') {
+        const reason = data?.blockedReason
+        const label = phase === 'blocked'
+          ? `目标被阻塞${reason ? `：${reason.code ?? ''} ${reason.message ?? ''}`.slice(0, 120) : ''}`
+          : '目标已达成 ✓'
+        for (const b of targets) this.enqueueNotice(b.chatId, `> ${label}`)
       }
       return
     }

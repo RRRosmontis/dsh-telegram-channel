@@ -85,6 +85,11 @@ export declare class TelegramBridge {
     /** 按名称解析宿主服务（Cordis 需 ctx.get；mock/plain ctx 走自有属性兜底）。 */
     private serviceOf;
     private requestCompact;
+    /**
+     * TG /goal —— 走宿主命令运行时（commands.execute），与 Web 端 /goal 完全同一条
+     * 通道：command-goal 在宿主侧操作 session-log 支撑的 goals 域，不依赖 GUI 连接。
+     */
+    private requestGoal;
     /** 等待压缩落定并汇报结果（不阻塞轮询循环）。 */
     private runCompaction;
     private followupBound;
