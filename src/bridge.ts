@@ -101,6 +101,8 @@ interface TgPendingAsk {
   kbSel: Map<number, Set<number>>
   /** question index → answer parsed from a text reply (letters or custom). */
   textAnswers: Map<number, { id?: string; selected: string[]; custom?: string }>
+  /** questions the user chose to answer with free text (✏️ button): the next text reply fills them. */
+  textWanted: Set<number>
 }
 
 /** chatId → pending approval request mirrored to Telegram. */
@@ -1636,6 +1638,7 @@ export class TelegramBridge {
           at: Date.now(),
           kbSel: new Map(),
           textAnswers: new Map(),
+          textWanted: new Set(),
         }
         this.pendingAsks.set(String(chatId), pending)
         void this.deliverAskPrompt(Number(chatId), pending)
@@ -1672,6 +1675,8 @@ export class TelegramBridge {
               text: `${j + 1}. ${o.label}`.slice(0, 48),
               callback_data: `${ASK_CB}${i}:${j}`,
             }]),
+            // Standing third choice: free-text answer, always available.
+            [{ text: '✏️ 输入自定义答案', callback_data: `${ASK_CB}${i}:custom` }],
             ...(q.multiSelect ? [[{ text: '✅ 提交所选', callback_data: `${ASK_CB}${i}:ok` }]] : []),
           ],
         }
@@ -1734,8 +1739,14 @@ export class TelegramBridge {
         else parts.push([null, line])
       }
       if (parts.some(([idx]) => idx === null)) {
-        await this.enqueueNotice(chatId, `共 ${questions.length} 个问题，请每行用 1:/2: 前缀分别作答`)
-        return
+        // ✏️ free-text route: a question awaiting text absorbs the whole message.
+        const target = [...pending.textWanted].sort((a, b) => a - b)[0]
+        if (target !== undefined) {
+          parts = [[target, text.trim()]]
+        } else {
+          await this.enqueueNotice(chatId, `共 ${questions.length} 个问题，请每行用 1:/2: 前缀分别作答`)
+          return
+        }
       }
     }
     for (const [idx, raw] of parts) {
@@ -1764,6 +1775,7 @@ export class TelegramBridge {
       } else {
         pending.textAnswers.set(idx, { id: q.id, selected: [], custom: cleaned })
       }
+      pending.textWanted.delete(idx)
     }
     // Keyboard selections take precedence per question; resolve when complete.
     if (!this.finalizeAskIfComplete(chatId, pending)) {
@@ -1789,6 +1801,14 @@ export class TelegramBridge {
       return
     }
     const opts = Array.isArray(q.options) ? q.options : []
+    if (action === 'custom') {
+      // Free-text path: discard button selections for this question and wait
+      // for the user's next text message (routed via textWanted).
+      pending.kbSel.delete(qi)
+      pending.textWanted.add(qi)
+      await this.client.answerCallbackQuery(cq.id, '请直接发送你的答案文本')
+      return
+    }
     if (action === 'ok') {
       if (!pending.kbSel.get(qi)?.size) {
         await this.client.answerCallbackQuery(cq.id, '请先点选选项')
