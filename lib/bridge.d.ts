@@ -42,10 +42,12 @@ export declare class TelegramBridge {
     private readonly pendingAsks;
     private hookTimer;
     private readonly pendingApprovalsTG;
-    private disposeApprovalHook;
     /** Prototype-ask interceptor state (see installAskInterceptor). */
     private askInstalled;
     private askRestore;
+    /** Prototype-approval interceptor state (see installApprovalInterceptor). */
+    private approvalInstalled;
+    private approvalRestore;
     /** callId → tool name (tool/result failure notices) */
     private readonly callNames;
     /** sessionId → latest todo snapshot (/mission) */
@@ -140,7 +142,8 @@ export declare class TelegramBridge {
     private handleTgAnswer;
     /** Inline-keyboard tap on an ask message: toggle/record the choice, resolve when every question is answered. */
     private handleAskCallback;
-    private onApprovalRequest;
+    private installApprovalInterceptor;
+    private aroundApprovalRequest;
     private handleTgApproval;
     private stopBound;
     private sendMission;

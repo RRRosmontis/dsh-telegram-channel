@@ -196,6 +196,8 @@ const ASK_CB = 'ask:'
 const MAX_BUTTONS = 40
 /** Marker stored on UserQuestionService.prototype for the ask interceptor. */
 const kTgAskWrapped = Symbol.for('dsh-telegram-channel.askWrapped')
+/** Marker stored on ApprovalService.prototype for the approval interceptor. */
+const kTgApprovalWrapped = Symbol.for('dsh-telegram-channel.approvalWrapped')
 
 function lastContextKeyboard(): InlineKeyboardMarkup {
   return {
@@ -269,10 +271,12 @@ export class TelegramBridge {
   private readonly pendingAsks = new Map<string, TgPendingAsk>()
   private hookTimer: ReturnType<typeof setTimeout> | undefined
   private readonly pendingApprovalsTG = new Map<string, TgPendingApproval>()
-  private disposeApprovalHook: (() => void) | undefined
   /** Prototype-ask interceptor state (see installAskInterceptor). */
   private askInstalled = false
   private askRestore: (() => void) | undefined
+  /** Prototype-approval interceptor state (see installApprovalInterceptor). */
+  private approvalInstalled = false
+  private approvalRestore: (() => void) | undefined
   /** callId → tool name (tool/result failure notices) */
   private readonly callNames = new Map<string, string>()
   /** sessionId → latest todo snapshot (/mission) */
@@ -320,10 +324,7 @@ export class TelegramBridge {
     // per-fiber events registry in dsh 0.1.5-rc.1), so the prototype wrap —
     // which sees EVERY ask regardless of fiber/instance — is the reliable seam.
     this.installAskInterceptor()
-    this.disposeApprovalHook?.()
-    this.disposeApprovalHook = (this.ctx as unknown as {
-      on: (event: string, handler: (req: ApprovalRequestLike, next: () => Promise<string>) => Promise<string>) => () => void
-    }).on('approval/request', (req, next) => this.onApprovalRequest(req, next))
+    this.installApprovalInterceptor()
     void this.client.setMyCommands([
       { command: 'start', description: '欢迎与用法' },
       { command: 'sessions', description: '按工作区列出并附着会话' },
@@ -381,8 +382,9 @@ export class TelegramBridge {
     this.askRestore?.()
     this.askRestore = undefined
     this.askInstalled = false
-    this.disposeApprovalHook?.()
-    this.disposeApprovalHook = undefined
+    this.approvalRestore?.()
+    this.approvalRestore = undefined
+    this.approvalInstalled = false
     if (this.pollPromise) {
       await this.pollPromise.catch(() => {})
       this.pollPromise = undefined
@@ -1286,6 +1288,7 @@ export class TelegramBridge {
 
   private async onSessionEvent(session: SessionLike, event: SessionEvent): Promise<void> {
     if (!this.askInstalled) this.installAskInterceptor()
+    if (!this.approvalInstalled) this.installApprovalInterceptor()
     const id = String(session.id)
     const targets = [...this.bindings.values()].filter((b) => b.sessionId === id)
     if (targets.length === 0) return
@@ -1836,11 +1839,50 @@ export class TelegramBridge {
     }
   }
 
-  // ── approval: TG answering via dual-path race on the request waterfall ──
+  // ── approval: TG answering via a prototype interceptor ──
+  //
+  // Same root cause and same cure as ask_user: the 'approval/request'
+  // waterfall dispatches on a per-fiber events registry that this plugin's
+  // ctx.on never sees (dsh 0.1.5-rc.1), so ApprovalService.prototype.request
+  // is wrapped instead — the class is shared across instances and fibers.
 
-  private async onApprovalRequest(
+  private installApprovalInterceptor(): void {
+    if (this.approvalInstalled) return
+    let svc: { constructor: { prototype: Record<string | symbol, unknown> } } | undefined
+    try {
+      svc = (this.ctx as unknown as { get: (name: string) => unknown }).get('approval') as
+        | { constructor: { prototype: Record<string | symbol, unknown> } }
+        | undefined
+    } catch {
+      return // service not ready yet — retried lazily from onSessionEvent
+    }
+    if (!svc) return
+    const proto = svc.constructor.prototype
+    const prev = proto[kTgApprovalWrapped] as { restore: () => void; bridge: unknown } | undefined
+    if (prev?.bridge === this) {
+      this.approvalInstalled = true
+      this.approvalRestore = prev.restore
+      return
+    }
+    prev?.restore() // stale wrapper from a disposed bridge instance
+    const orig = proto.request as (this: unknown, req: unknown) => Promise<string>
+    const bridge = this
+    const wrapped = function (this: unknown, req: unknown): Promise<string> {
+      return bridge.aroundApprovalRequest(this, req as ApprovalRequestLike, orig as (this: unknown, req: ApprovalRequestLike) => Promise<string>)
+    }
+    proto.request = wrapped
+    const restore = (): void => {
+      if (proto.request === wrapped) proto.request = orig
+    }
+    proto[kTgApprovalWrapped] = { restore, bridge: this }
+    this.approvalRestore = restore
+    this.approvalInstalled = true
+  }
+
+  private aroundApprovalRequest(
+    service: unknown,
     req: ApprovalRequestLike,
-    next: () => Promise<string>,
+    orig: (this: unknown, req: ApprovalRequestLike) => Promise<string>,
   ): Promise<string> {
     const sessionId = req?.agent?.id !== undefined ? String(req.agent.id) : undefined
     const targets = sessionId !== undefined
@@ -1861,7 +1903,7 @@ export class TelegramBridge {
     }
     if (req?.signal?.aborted) {
       rejectFn(new Error('approval withdrawn'))
-      return next()
+      return orig.call(service, req)
     }
     req?.signal?.addEventListener('abort', onAbort, { once: true })
     if (targets.length > 0) {
@@ -1873,7 +1915,7 @@ export class TelegramBridge {
       }
     }
     // No bound TG chat: promise never settles — the UI remains the only answer path.
-    const gui = next()
+    const gui = Promise.resolve().then(() => orig.call(service, req))
     void gui.then(() => {
       for (const [chatId, p] of [...this.pendingApprovalsTG]) {
         if (p.ask !== ask) continue
