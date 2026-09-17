@@ -144,6 +144,9 @@ export declare class TelegramBridge {
     private handleAskCallback;
     private installApprovalInterceptor;
     private aroundApprovalRequest;
+    /** Approval prompt as native inline-keyboard buttons; falls back to a plain-text prompt. */
+    private deliverApprovalPrompt;
+    private handleApprovalCallback;
     private handleTgApproval;
     private stopBound;
     private sendMission;

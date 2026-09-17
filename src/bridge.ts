@@ -191,8 +191,10 @@ const MODEL_CB = 'mdl:'
 /** Use eff: (not me:) — short prefix, no collision with other callbacks. */
 const EFFORT_CB = 'eff:'
 const BACK_MODEL_CB = 'mb'
-/** ask:{questionIndex}:{optionIndex|ok} — inline-keyboard taps for ask_user_question. */
+/** ask:{questionIndex}:{optionIndex|ok|custom} — inline-keyboard taps for ask_user_question. */
 const ASK_CB = 'ask:'
+/** apr:allow / apr:deny — inline-keyboard taps for tool approvals. */
+const APR_CB = 'apr:'
 const MAX_BUTTONS = 40
 /** Marker stored on UserQuestionService.prototype for the ask interceptor. */
 const kTgAskWrapped = Symbol.for('dsh-telegram-channel.askWrapped')
@@ -518,6 +520,10 @@ export class TelegramBridge {
 
     if (data.startsWith(ASK_CB)) {
       await this.handleAskCallback(chatId, cq)
+      return
+    }
+    if (data.startsWith(APR_CB)) {
+      await this.handleApprovalCallback(chatId, cq, data)
       return
     }
     if (data === LAST_CB) {
@@ -1911,7 +1917,9 @@ export class TelegramBridge {
       const reason = req?.reason ? String(req.reason).slice(0, 200) : ''
       for (const chatId of targets) {
         this.pendingApprovalsTG.set(chatId, { toolName, ask })
-        this.enqueueNotice(Number(chatId), `权限审批：${toolName}${reason ? `\n(${reason})` : ''}\n回复 [A] 允许一次 / [B] 拒绝（/cancel 关闭 TG 审批）`)
+        void this.deliverApprovalPrompt(Number(chatId), toolName, reason).catch((err) => {
+          this.ctx.logger.error(this.redact(err))
+        })
       }
     }
     // No bound TG chat: promise never settles — the UI remains the only answer path.
@@ -1931,6 +1939,45 @@ export class TelegramBridge {
       }
     })
     return Promise.race([promise, gui]) as Promise<string>
+  }
+
+  /** Approval prompt as native inline-keyboard buttons; falls back to a plain-text prompt. */
+  private async deliverApprovalPrompt(chatId: number, toolName: string, reason: string): Promise<void> {
+    const keyboard: InlineKeyboardMarkup = {
+      inline_keyboard: [[
+        { text: '✅ 允许一次', callback_data: `${APR_CB}allow` },
+        { text: '❌ 拒绝', callback_data: `${APR_CB}deny` },
+      ]],
+    }
+    try {
+      await this.withRetry(() =>
+        this.client.sendMessage(chatId, `权限审批：${toolName}${reason ? `\n(${reason})` : ''}`, undefined, keyboard),
+      )
+    } catch (err) {
+      this.ctx.logger.error(this.redact(err))
+      // Never lose an approval: degrade to the text-answer prompt.
+      this.enqueueNotice(chatId, `权限审批：${toolName}${reason ? `\n(${reason})` : ''}\n回复 [A] 允许一次 / [B] 拒绝（/cancel 关闭 TG 审批）`)
+    }
+  }
+
+  private async handleApprovalCallback(chatId: number, cq: { id: string; data?: string }, data: string): Promise<void> {
+    const approval = this.pendingApprovalsTG.get(String(chatId))
+    if (!approval) {
+      await this.client.answerCallbackQuery(cq.id, '该审批已失效（可能已在 Web 端处理）')
+      return
+    }
+    const allow = data === `${APR_CB}allow`
+    approval.ask.answered = true
+    for (const [cid, p] of this.pendingApprovalsTG) {
+      if (p.ask === approval.ask) this.pendingApprovalsTG.delete(cid)
+    }
+    if (allow) {
+      approval.ask.resolve('allowed-once')
+      await this.client.answerCallbackQuery(cq.id, `已允许 ${approval.toolName} 执行一次`)
+    } else {
+      approval.ask.resolve('rejected')
+      await this.client.answerCallbackQuery(cq.id, '已拒绝该工具执行')
+    }
   }
 
   private async handleTgApproval(chatId: number, approval: TgPendingApproval, text: string): Promise<void> {
